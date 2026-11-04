@@ -16,7 +16,8 @@ independent project, not made or endorsed by AOC.
 | Other AOC models | brightness, contrast (vendor settings once the model is added; see below) |
 
 Every setting listed for a model has passed a write, read-back and restore
-check on that model. Settings that haven't are left out or read-only.
+check on that model. Settings that haven't are read-only until someone with
+that monitor runs [`aocctl verify`](#verify-a-setting) on them.
 
 ## Install
 
@@ -166,6 +167,36 @@ If your AOC model isn't supported yet:
 `--aoc-items` reads the AOC vendor items aocctl already knows from other models.
 It's experimental: it only reads, and only on AOC monitors.
 
+From the report and your monitor's menu, a maintainer adds your model with its
+settings read-only. You can then make them writable with `aocctl verify`.
+
+## Verify a setting
+
+A setting shown as `(read-only)` in `aocctl get` hasn't been write-tested on
+your model yet. To test one:
+
+```sh
+aocctl verify shadow-control --confirm-write
+```
+
+It moves the setting one step from its current value (down if it can, else up),
+reads it back, then writes your original value back and reads that too. Your
+screen may change for a moment. It prints a JSON report (without your serial
+number) and exits 0 only if both values read back. Paste the report into a
+[write verification](https://github.com/ManishModak/aocctl/issues/new?template=write-verification.yml)
+issue, so the setting can be made writable for your model.
+
+- It only tests settings aocctl already knows for your model, plus brightness
+  and contrast, and never goes outside the setting's known values or the
+  maximum your monitor reports.
+- Ctrl-C waits until the original value is back. If the power goes or the
+  cable is pulled mid-test, or the report says it couldn't confirm the restore,
+  set the setting back in the monitor's on-screen menu; the report's `before`
+  value is what it was.
+- Like `set`, testing `shadow-control` or `game-color` can switch the monitor
+  out of its FPS and racing game modes; the report shows the game mode
+  before and after.
+
 ## How it stays safe
 
 - It only opens i2c buses that belong to a connected external monitor's
@@ -173,7 +204,9 @@ It's experimental: it only reads, and only on AOC monitors.
 - AOC vendor commands go only to monitors whose EDID says AOC.
 - It writes only settings verified for that exact model (EDID product code and
   model name), checks every value against the setting's allowed values and the
-  monitor's reported maximum, and never resends a write.
+  monitor's reported maximum, and never resends a write. The one exception is
+  `aocctl verify --confirm-write`, which tests one step on a known setting and
+  restores it.
 - It locks the i2c device while it works, the same way ddcutil does, so the two
   don't interleave commands.
 
