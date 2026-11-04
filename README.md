@@ -69,9 +69,10 @@ stay root-only. The `i2c-dev` kernel module must be loaded; `aocctl.conf` loads
 it at boot.
 
 The rule relies on systemd-logind's `uaccess`. Without systemd, or to use
-aocctl from an SSH session, add yourself to the `i2c` group instead
-(`sudo usermod -aG i2c $USER`, then log in again); that grants every i2c bus,
-as does the udev rule that `ddcutil` packages install. If `ddcutil detect`
+aocctl from an SSH session, use the `i2c` group instead: install your
+distribution's `i2c-tools` package, which creates the group and gives it the
+i2c devices, then `sudo usermod -aG i2c $USER` and log in again. That grants
+every i2c bus, as does the udev rule that `ddcutil` packages install. If `ddcutil detect`
 works for your user, aocctl works too.
 
 Having that access doesn't by itself mean your monitor, GPU or connection
