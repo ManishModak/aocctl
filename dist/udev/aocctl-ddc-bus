@@ -1,0 +1,23 @@
+#!/bin/sh
+# Called by 60-aocctl-ddc-i2c.rules with the sysfs path of an i2c-dev device.
+# Exits 0 when that bus is the DDC/CI bus of an external DRM connector (DP, HDMI,
+# DVI, VGA): either a DP AUX bus registered under the connector, or the bus the
+# connector's `ddc` link points to. These are the buses aocctl opens. Everything
+# else (GPU SMU/OEM buses, SMBus/SPD, sensors, built-in panels) exits 1.
+
+adapter=$(readlink -f "$1/device") || exit 1
+
+# True for an external connector's sysfs directory, e.g. .../card1-HDMI-A-1.
+external() {
+	[ "$(readlink -f "$1/subsystem")" = /sys/class/drm ] || return 1
+	case ${1##*/} in
+	card[0-9]*-DP-* | card[0-9]*-HDMI-* | card[0-9]*-DVI-* | card[0-9]*-VGA-*) return 0 ;;
+	esac
+	return 1
+}
+
+external "${adapter%/*}" && exit 0
+for c in /sys/class/drm/card*-*; do
+	[ "$(readlink -f "$c/ddc")" = "$adapter" ] && external "$(readlink -f "$c")" && exit 0
+done
+exit 1
