@@ -16,6 +16,7 @@ local lastScan = nil
 local reading = false
 local target = nil -- brightness the scroll wheel asked for and that isn't written yet
 local writing = nil -- brightness being written now
+local held = 0 -- brightness change scrolled while a read ran; applied to what it reads
 -- This bar's output. barWidget.outputName() answers only inside update(), not while the script
 -- loads or in callbacks, so update() keeps it here.
 local output = nil
@@ -63,6 +64,8 @@ local function watchBrightness()
   end)
 end
 
+local applyScroll
+
 local function readBrightness()
   if display == nil or not lib.reachable(display) or reading or writing ~= nil then
     return
@@ -71,6 +74,8 @@ local function readBrightness()
   lib.run({ "get", "brightness", "--display", display.connector }, 15000, function(data, err)
     reading = false
     local row = data and data.settings and data.settings[1]
+    local delta = held
+    held = 0
     if row and row.value then
       problem = nil
       brightness = { value = row.value, max = row.max }
@@ -80,6 +85,9 @@ local function readBrightness()
       lastScan = nil -- the monitor may have been unplugged or replugged: look again
     end
     render()
+    if delta ~= 0 and problem == nil then
+      applyScroll(delta)
+    end
   end)
 end
 
@@ -125,12 +133,33 @@ local function writeTarget()
     if data and data.read_back then
       brightness = { value = data.read_back, max = brightness and brightness.max or 100 }
       noctalia.state.set(lib.brightnessKey(display.connector), brightness)
-    elseif err then
-      noctalia.notifyError("AOC brightness", err)
     end
+    if data and data.status == "verified" then
+      render()
+      writeTarget()
+      return
+    end
+    -- Not confirmed: drop scrolls counted from the value that didn't stick, and read the
+    -- monitor unless it already told us what it has
+    target = nil
+    noctalia.notifyError("AOC brightness", err or (data.error and `couldn't read it back: {data.error}`) or `the monitor reads back {data.read_back}`)
     render()
-    writeTarget()
+    if not (data and data.read_back) then
+      readBrightness()
+    end
   end)
+end
+
+-- Moves the brightness by `delta` from the newest value: the one asked for, being written,
+-- or last read
+applyScroll = function(delta)
+  local max = brightness.max or 100
+  local base = target or writing or brightness.value
+  target = math.clamp(base + delta, 0, max)
+  local shown = { value = target, max = max }
+  noctalia.osd.show("brightness-half", `{percent(shown)}%`, { progress = target / max })
+  barWidget.setText(`{percent(shown)}%`)
+  writeTarget()
 end
 
 function onScroll(axis, steps)
@@ -139,13 +168,12 @@ function onScroll(axis, steps)
   end
   -- Whole detents up (negative steps) raise brightness; a partial touchpad step counts as one
   local detents = math.max(1, math.floor(math.abs(steps) + 0.5))
-  local max = brightness.max or 100
-  local base = target or writing or brightness.value
-  target = math.clamp(base + (steps < 0 and detents or -detents) * STEP, 0, max)
-  local shown = { value = target, max = max }
-  noctalia.osd.show("brightness-half", `{percent(shown)}%`, { progress = target / max })
-  barWidget.setText(`{percent(shown)}%`)
-  writeTarget()
+  local delta = (steps < 0 and detents or -detents) * STEP
+  if reading then
+    held += delta -- the monitor may have changed since the last read: wait for this one
+  else
+    applyScroll(delta)
+  end
 end
 
 -- Reads again when the pointer arrives, so a scroll starts from the monitor's current value

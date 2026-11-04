@@ -12,8 +12,10 @@ local presets = {} -- rows of `aocctl preset list --json`
 local drafts = {} -- slider values the user is dragging to, by setting id
 local status = nil -- { text, error }
 local loading = false
+local opening = 0 -- counts panel openings, so a slow `aocctl list` from an earlier one is ignored
 
--- aocctl runs one at a time from here; a newer write of the same setting replaces a queued one
+-- aocctl runs one at a time from here, in the order the user acted; a newer job with the same
+-- key drops the queued one
 local queue = {}
 local running = false
 local wrote = false -- a write ran since the last full read
@@ -38,8 +40,8 @@ local function enqueue(job)
   if job.key then
     for i, queued in ipairs(queue) do
       if queued.key == job.key then
-        queue[i] = job
-        return
+        table.remove(queue, i)
+        break
       end
     end
   end
@@ -354,7 +356,12 @@ function onOpen(_context)
   end
   loading = true
   render()
+  opening += 1
+  local this = opening
   lib.run({ "list" }, 15000, function(list, err)
+    if this ~= opening then
+      return
+    end
     if list == nil then
       loading = false
       setStatus(`aocctl: {err}`, true)
