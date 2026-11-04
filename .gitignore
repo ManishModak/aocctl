@@ -1,1 +1,5 @@
 /target
+# Flatpak build output and generated cargo sources (see dist/flatpak/)
+/build-flatpak
+/.flatpak-builder
+/dist/flatpak/cargo-sources.json

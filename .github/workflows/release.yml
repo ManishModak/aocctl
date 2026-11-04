@@ -24,14 +24,14 @@ jobs:
       - name: Check the tag matches Cargo.toml
         if: github.ref_type == 'tag'
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "aocctl") | .version')
           test "$GITHUB_REF_NAME" = "v$version" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
       - name: Build and package
         env:
           # musl targets link self-contained; rust-lld avoids needing a cross gcc.
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "aocctl") | .version')
           mkdir out
           for arch in x86_64 aarch64; do
             cargo build --release --locked --target "$arch-unknown-linux-musl"

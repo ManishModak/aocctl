@@ -52,11 +52,29 @@ sudo modprobe i2c-dev && sudo udevadm control --reload && sudo udevadm trigger -
 With Rust 1.85 or newer:
 
 ```sh
-cargo install --git https://github.com/ManishModak/aocctl
+cargo install --git https://github.com/ManishModak/aocctl aocctl
 ```
 
 Then set up permissions with the files in the repository's `dist/` folder, as in
 the binary install above (`dist/udev/` and `dist/modules-load.d/`).
+
+### Desktop app
+
+`aocctl-gtk` is a GTK app with the same settings and presets as the command, for
+people who'd rather not use a terminal. It needs GTK 4.14 and libadwaita 1.5 or
+newer, plus the same permissions as the command (below); if they're missing, it
+says what to do. From source, with Rust 1.92 or newer and the GTK 4 and
+libadwaita development packages:
+
+```sh
+cargo install --git https://github.com/ManishModak/aocctl aocctl-gtk
+```
+
+To build it as a Flatpak, see `dist/flatpak/`. The Flatpak needs `--device=all`,
+because Flatpak has no narrower permission that exposes the monitor's
+`/dev/i2c-N` device; the host still decides who may open it, so the udev rule or
+`i2c` group below is needed either way. It shares presets with the command
+through `~/.config/aocctl`.
 
 ### Permissions
 
