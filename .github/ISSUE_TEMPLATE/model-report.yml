@@ -1,0 +1,29 @@
+name: Model report
+description: Help add support for your AOC monitor
+title: "Model report: AOC <model>"
+labels: [model-report]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Monitor model
+      placeholder: e.g. 27G4
+    validations:
+      required: true
+  - type: textarea
+    id: probe
+    attributes:
+      label: Output of `aocctl probe --aoc-items`
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: GPU, driver and connection
+      placeholder: e.g. AMD RX 7800 XT, amdgpu, DisplayPort
+  - type: textarea
+    id: menu
+    attributes:
+      label: Settings in your monitor's on-screen menu
+      description: Names and options of settings you'd like aocctl to support (shadow control, overdrive levels, Low Blue modes, ...).
