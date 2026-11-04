@@ -1,0 +1,8 @@
+{
+  "uuid": "aocctl@manishmodak.github.io",
+  "name": "AOC Monitor",
+  "description": "Your AOC monitor's brightness in Quick Settings, and your aocctl presets in its menu. Needs aocctl: https://github.com/ManishModak/aocctl",
+  "shell-version": ["46", "47", "48", "49"],
+  "url": "https://github.com/ManishModak/aocctl",
+  "version-name": "0.1.0"
+}
