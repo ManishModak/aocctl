@@ -124,7 +124,8 @@ impl SettingRow {
         }
         let mut subtitle = String::new();
         if !self.setting.verified_write {
-            subtitle = "Read-only: changing it hasn't been verified on this model yet".into();
+            subtitle =
+                "Read-only until its write is verified on this model (the “aocctl verify” command tests it)".into();
         }
         self.suppress.set(true);
         match (self.setting.domain, &self.scale, &self.combo) {

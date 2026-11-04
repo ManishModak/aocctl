@@ -1,7 +1,10 @@
 # Flatpak build of the aocctl desktop app (aocctl-gtk). Build from the repository root:
 #   python3 flatpak-cargo-generator.py Cargo.lock -o dist/flatpak/cargo-sources.json
-#   flatpak run org.flatpak.Builder --user --install --force-clean build-flatpak dist/flatpak/io.github.manishmodak.aocctl.yml
-# (flatpak-cargo-generator.py is from github.com/flatpak/flatpak-builder-tools; rerun it after Cargo.lock changes.)
+#   flatpak run org.flatpak.Builder --user --install --force-clean --disable-rofiles-fuse \
+#     build-flatpak dist/flatpak/io.github.manishmodak.aocctl.yml
+# flatpak-cargo-generator.py is from github.com/flatpak/flatpak-builder-tools; rerun it after Cargo.lock changes.
+# Builder installed from Flathub (org.flatpak.Builder) needs --disable-rofiles-fuse, and its build directories
+# must be inside the repository (it can't see /var/tmp).
 id: io.github.manishmodak.aocctl
 runtime: org.gnome.Platform
 runtime-version: '51'
