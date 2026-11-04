@@ -197,13 +197,7 @@ fn get(as_json: bool, m: &Monitor, wanted: &[String]) -> Result<bool, String> {
         let r = monitor::read(&mut ddc, s);
         ok &= r.is_ok();
         if as_json {
-            rows.push(match r {
-                Ok(r) => json!({
-                    "id": s.id, "value": r.value, "max": r.max,
-                    "label": s.label_for(r.value), "writable": s.verified_write,
-                }),
-                Err(e) => json!({ "id": s.id, "error": e.to_string() }),
-            });
+            rows.push(get_row(s, r.map_err(|e| e.to_string())));
         } else {
             let lock = if s.verified_write { "" } else { "  (read-only)" };
             match r {
@@ -219,6 +213,25 @@ fn get(as_json: bool, m: &Monitor, wanted: &[String]) -> Result<bool, String> {
         );
     }
     Ok(ok)
+}
+
+/// One `get --json` row: the reading, plus the setting's name and its allowed values
+/// (`domain`), so a desktop widget can build its controls without knowing the model.
+fn get_row(s: &Setting, r: Result<Reading, String>) -> Value {
+    let domain = match s.domain {
+        Domain::Range { min, max } => json!({ "min": min, "max": max }),
+        Domain::Enum(names) => json!({ "options": names }),
+    };
+    let mut row = match r {
+        Ok(r) => json!({
+            "id": s.id, "value": r.value, "max": r.max,
+            "label": s.label_for(r.value), "writable": s.verified_write,
+        }),
+        Err(e) => json!({ "id": s.id, "error": e }),
+    };
+    row["name"] = json!(s.label);
+    row["domain"] = domain;
+    row
 }
 
 fn set(as_json: bool, root: &Path, m: &Monitor, id: &str, input: &str) -> Result<bool, String> {
@@ -436,5 +449,38 @@ fn verify_summary(m: &Monitor, s: &Setting, v: &Verification) {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setting(id: &str) -> &'static Setting {
+        let profile = models::PROFILES.iter().find(|p| p.model == "24G4").unwrap();
+        models::settings_for(Some(profile))
+            .into_iter()
+            .find(|s| s.id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn get_rows_describe_the_allowed_values() {
+        let row = get_row(setting("overdrive"), Ok(Reading { value: 2, max: 3 }));
+        assert_eq!(row["name"], "Overdrive");
+        assert_eq!(row["label"], "Medium");
+        assert_eq!(row["domain"], json!({ "options": ["Off", "Weak", "Medium", "Strong"] }));
+
+        let row = get_row(setting("game-color"), Ok(Reading { value: 10, max: 20 }));
+        assert_eq!(row["domain"], json!({ "min": 0, "max": 20 }));
+        assert_eq!(row["max"], 20);
+    }
+
+    #[test]
+    fn failed_reads_still_describe_the_setting() {
+        let row = get_row(setting("brightness"), Err("no reply".into()));
+        assert_eq!(row["error"], "no reply");
+        assert_eq!(row["domain"], json!({ "min": 0, "max": 100 }));
+        assert!(row.get("value").is_none());
     }
 }
