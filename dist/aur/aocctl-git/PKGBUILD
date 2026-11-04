@@ -1,0 +1,52 @@
+# Maintainer: Manish Modak <https://github.com/ManishModak>
+# Builds the latest commit on main.
+pkgname=aocctl-git
+_pkgname=aocctl
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Control AOC monitor settings over DDC/CI, including AOC-only settings (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/ManishModak/aocctl'
+license=('MIT OR Apache-2.0')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo' 'git')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  local ver
+  ver=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+  printf '%s.r%s.g%s' "$ver" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen
+}
+
+package() {
+  cd "$_pkgname"
+  install -Dm755 target/release/aocctl -t "$pkgdir/usr/bin/"
+  install -Dm644 dist/udev/60-aocctl-ddc-i2c.rules -t "$pkgdir/usr/lib/udev/rules.d/"
+  install -Dm755 dist/udev/aocctl-ddc-bus -t "$pkgdir/usr/lib/udev/"
+  install -Dm644 dist/modules-load.d/aocctl.conf -t "$pkgdir/usr/lib/modules-load.d/"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$_pkgname/"
+  install -Dm644 LICENSE-MIT LICENSE-APACHE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

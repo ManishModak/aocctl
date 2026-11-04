@@ -20,22 +20,59 @@ check on that model. Settings that haven't are left out or read-only.
 
 ## Install
 
-From source, with Rust 1.85 or newer:
+### Arch Linux (AUR)
+
+```sh
+paru -S aocctl      # latest release; aocctl-git builds the latest commit
+```
+
+The package sets up permissions (see below) and loads `i2c-dev`; no reboot
+needed.
+
+### Prebuilt binary (any distribution, x86_64 or aarch64)
+
+Static binaries are attached to each [release](https://github.com/ManishModak/aocctl/releases):
+
+```sh
+v=0.1.0 arch=$(uname -m)
+base=https://github.com/ManishModak/aocctl/releases/download/v$v
+curl -fL -O "$base/aocctl-$v-$arch-linux.tar.gz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+tar xzf "aocctl-$v-$arch-linux.tar.gz" && cd "aocctl-$v-$arch-linux"
+sudo install -Dm755 aocctl /usr/local/bin/aocctl
+sudo install -Dm755 aocctl-ddc-bus /usr/lib/udev/aocctl-ddc-bus
+sudo install -Dm644 60-aocctl-ddc-i2c.rules /etc/udev/rules.d/60-aocctl-ddc-i2c.rules
+sudo install -Dm644 aocctl.conf /etc/modules-load.d/aocctl.conf
+sudo modprobe i2c-dev && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=i2c-dev
+```
+
+### From source (cargo)
+
+With Rust 1.85 or newer:
 
 ```sh
 cargo install --git https://github.com/ManishModak/aocctl
 ```
 
+Then set up permissions with the files in the repository's `dist/` folder, as in
+the binary install above (`dist/udev/` and `dist/modules-load.d/`).
+
 ### Permissions
 
 aocctl needs read/write access to the `/dev/i2c-N` device of your monitor's
-connection: the same access ddcutil needs. On most distributions:
+connection. The packages and the steps above install a udev rule that gives the
+user logged in at the computer (not over SSH) access to monitor buses only: the
+DisplayPort AUX bus and the DDC bus of each external DP, HDMI, DVI or VGA
+connector, which are the buses aocctl uses. Other i2c buses, such as the GPU's
+power-management buses ("AMDGPU SMU"), RAM and motherboard SMBus, and sensors,
+stay root-only. The `i2c-dev` kernel module must be loaded; `aocctl.conf` loads
+it at boot.
 
-1. Load the `i2c-dev` kernel module (`sudo modprobe i2c-dev`; to load it at
-   boot, add `i2c-dev` to a file in `/etc/modules-load.d/`).
-2. Get access to the device, either through the udev rule your distribution's
-   `ddcutil` package installs, or by adding yourself to the `i2c` group
-   (`sudo usermod -aG i2c $USER`, then log in again).
+The rule relies on systemd-logind's `uaccess`. Without systemd, or to use
+aocctl from an SSH session, add yourself to the `i2c` group instead
+(`sudo usermod -aG i2c $USER`, then log in again); that grants every i2c bus,
+as does the udev rule that `ddcutil` packages install. If `ddcutil detect`
+works for your user, aocctl works too.
 
 Having that access doesn't by itself mean your monitor, GPU or connection
 supports DDC/CI; `aocctl list` shows what answers. NVIDIA's proprietary driver

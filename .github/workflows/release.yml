@@ -1,0 +1,67 @@
+# Builds static Linux binaries. On a v* tag it also publishes them as a GitHub
+# release with SHA256SUMS; on pull requests it only builds, so a change that
+# breaks the release build shows up before a tag is pushed.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - name: Install qemu to run the aarch64 binary
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Check the tag matches Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          test "$GITHUB_REF_NAME" = "v$version" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+      - name: Build and package
+        env:
+          # musl targets link self-contained; rust-lld avoids needing a cross gcc.
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          mkdir out
+          for arch in x86_64 aarch64; do
+            cargo build --release --locked --target "$arch-unknown-linux-musl"
+            bin="target/$arch-unknown-linux-musl/release/aocctl"
+            file "$bin" | grep -q 'statically linked\|static-pie linked'
+            "qemu-$arch" "$bin" --version
+            name="aocctl-$version-$arch-linux"
+            mkdir "$name"
+            cp "$bin" dist/udev/60-aocctl-ddc-i2c.rules dist/udev/aocctl-ddc-bus \
+              dist/modules-load.d/aocctl.conf README.md LICENSE-MIT LICENSE-APACHE "$name/"
+            tar czf "out/$name.tar.gz" "$name"
+          done
+          cd out && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: out/
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: out
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes out/*

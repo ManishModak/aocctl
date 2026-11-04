@@ -10,7 +10,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-const I2C_SLAVE: libc::c_ulong = 0x0703;
+const I2C_SLAVE: libc::Ioctl = 0x0703;
 const DDC_ADDR: libc::c_ulong = 0x37;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
