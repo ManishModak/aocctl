@@ -24,13 +24,13 @@ impl I2cDev {
             .read(true)
             .write(true)
             .open(path)
-            .map_err(|e| DdcError::Io(format!("{}: {e}", path.display())))?;
+            .map_err(|e| DdcError::Access(format!("{}: {e}", path.display())))?;
         let fd = file.as_raw_fd();
         let start = Instant::now();
         // SAFETY: fd is a valid open descriptor owned by `file`.
         while unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             if start.elapsed() > LOCK_TIMEOUT {
-                return Err(DdcError::Io(format!(
+                return Err(DdcError::Access(format!(
                     "{} is busy (locked by another program)",
                     path.display()
                 )));
@@ -40,7 +40,7 @@ impl I2cDev {
         // SAFETY: I2C_SLAVE takes the 7-bit address as an integer argument.
         if unsafe { libc::ioctl(fd, I2C_SLAVE, DDC_ADDR) } != 0 {
             let e = std::io::Error::last_os_error();
-            return Err(DdcError::Io(format!("{}: set address: {e}", path.display())));
+            return Err(DdcError::Access(format!("{}: set address: {e}", path.display())));
         }
         Ok(I2cDev { file })
     }

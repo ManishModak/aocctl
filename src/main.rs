@@ -94,12 +94,12 @@ fn run(cli: &Cli) -> Result<bool, String> {
     }
 }
 
-fn status(m: &Monitor) -> &'static str {
+fn status(m: &Monitor) -> String {
     match (m.is_aoc(), m.bus, m.profile) {
-        (false, _, _) => "not an AOC monitor",
-        (true, None, _) => "no DDC/CI answer",
-        (true, Some(_), Some(_)) => "supported",
-        (true, Some(_), None) => "brightness/contrast only (model not in aocctl yet; see `aocctl probe`)",
+        (false, _, _) => "not an AOC monitor".into(),
+        (true, None, _) => format!("no DDC/CI answer: {}", m.error.as_deref().unwrap_or("no i2c bus found")),
+        (true, Some(_), Some(_)) => "supported".into(),
+        (true, Some(_), None) => "brightness/contrast only (model not in aocctl yet; see `aocctl probe`)".into(),
     }
 }
 
@@ -111,6 +111,7 @@ fn list(as_json: bool, monitors: &[Monitor]) {
                 let e = &m.connector.edid;
                 json!({
                     "connector": m.connector.name,
+                    "connector_id": m.connector.id,
                     "mfg": e.mfg,
                     "model": e.model,
                     "product_code": format!("{:04x}", e.product_code),

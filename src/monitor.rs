@@ -13,6 +13,8 @@ pub struct Monitor {
     pub profile: Option<&'static Profile>,
     /// The bus DDC/CI answered on, if any (AOC monitors only; others are never probed).
     pub bus: Option<u32>,
+    /// Why no bus answered (permission denied, busy, no reply), for AOC monitors without one.
+    pub error: Option<String>,
 }
 
 impl Monitor {
@@ -29,6 +31,12 @@ impl Monitor {
         self.settings().into_iter().find(|s| s.id == id)
     }
 
+    /// Explains why this monitor can't be reached over DDC/CI.
+    pub fn unreachable(&self) -> String {
+        let why = self.error.as_deref().unwrap_or("no i2c bus found for it");
+        format!("{} does not answer over DDC/CI: {why}", self.connector.name)
+    }
+
     pub fn open(&self) -> Result<Ddc<I2cDev>, DdcError> {
         let bus = self.bus.ok_or(DdcError::NoReply)?;
         Ok(Ddc::new(I2cDev::open(&detect::dev_path(bus))?, Timing::default()))
@@ -40,26 +48,39 @@ pub fn discover(root: &Path) -> Vec<Monitor> {
     detect::connectors(root)
         .into_iter()
         .map(|connector| {
-            let aoc = models::is_aoc(&connector.edid);
-            let bus = if aoc {
-                connector.buses.iter().copied().find(|b| answers(*b))
-            } else {
-                None
-            };
+            let (mut bus, mut error) = (None, None);
+            if models::is_aoc(&connector.edid) {
+                for b in &connector.buses {
+                    match answers(*b) {
+                        Ok(()) => {
+                            bus = Some(*b);
+                            error = None;
+                            break;
+                        }
+                        // Keep the most useful reason: an access problem (permission, busy) beats
+                        // a fallback bus that simply doesn't answer.
+                        Err(e) => {
+                            let access = matches!(e, DdcError::Access(_));
+                            if error.as_ref().is_none_or(|(was_access, _)| access && !was_access) {
+                                error = Some((access, e.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
             Monitor {
                 profile: models::profile_for(&connector.edid),
                 connector,
                 bus,
+                error: error.map(|(_, e)| e),
             }
         })
         .collect()
 }
 
-fn answers(bus: u32) -> bool {
-    match I2cDev::open(&detect::dev_path(bus)) {
-        Ok(dev) => Ddc::new(dev, Timing::default()).get_vcp(0x10).is_ok(),
-        Err(_) => false,
-    }
+fn answers(bus: u32) -> Result<(), DdcError> {
+    let dev = I2cDev::open(&detect::dev_path(bus))?;
+    Ddc::new(dev, Timing::default()).get_vcp(0x10).map(|_| ())
 }
 
 /// Picks the monitor named by `wanted` (connector name or serial), or the only
@@ -71,7 +92,7 @@ pub fn select<'a>(monitors: &'a [Monitor], wanted: Option<&str>) -> Result<&'a M
         // monitor never silently redirects a command to another one.
         return match usable.as_slice() {
             [one] if one.bus.is_some() => Ok(one),
-            [one] => Err(format!("{} does not answer over DDC/CI", one.connector.name)),
+            [one] => Err(one.unreachable()),
             [] => Err("no AOC monitor connected (see `aocctl list`)".into()),
             _ => Err("several AOC monitors connected; pick one with --display <connector|serial>".into()),
         };
@@ -79,7 +100,7 @@ pub fn select<'a>(monitors: &'a [Monitor], wanted: Option<&str>) -> Result<&'a M
     let by_name: Vec<&Monitor> = usable
         .iter()
         .copied()
-        .filter(|m| m.connector.name.eq_ignore_ascii_case(wanted))
+        .filter(|m| m.connector.name.eq_ignore_ascii_case(wanted) || m.connector.id.eq_ignore_ascii_case(wanted))
         .collect();
     let by_serial: Vec<&Monitor> = usable
         .iter()
@@ -92,12 +113,12 @@ pub fn select<'a>(monitors: &'a [Monitor], wanted: Option<&str>) -> Result<&'a M
         ([], []) => return Err(format!("no AOC monitor matches '{wanted}' (see `aocctl list`)")),
         _ => {
             return Err(format!(
-                "'{wanted}' matches more than one monitor; use the connector name"
+                "'{wanted}' matches more than one monitor; use the full connector name (e.g. card1-DP-1)"
             ));
         }
     };
     if found.bus.is_none() {
-        return Err(format!("{} does not answer over DDC/CI", found.connector.name));
+        return Err(found.unreachable());
     }
     Ok(found)
 }
@@ -108,7 +129,7 @@ pub fn recheck(root: &Path, monitor: &Monitor) -> Result<(), String> {
     let now = detect::connectors(root);
     let same = now
         .iter()
-        .find(|c| c.name == monitor.connector.name)
+        .find(|c| c.id == monitor.connector.id)
         .is_some_and(|c| c.edid == monitor.connector.edid && monitor.bus.is_some_and(|b| c.buses.contains(&b)));
     if same {
         Ok(())
@@ -263,12 +284,14 @@ mod tests {
         };
         Monitor {
             connector: Connector {
+                id: format!("card0-{name}"),
                 name: name.into(),
                 edid,
                 buses: vec![],
             },
             profile: None,
             bus,
+            error: None,
         }
     }
 
@@ -284,7 +307,9 @@ mod tests {
         assert!(select(&two, None).is_err());
         assert_eq!(select(&two, Some("dp-1")).unwrap().connector.name, "DP-1");
         assert!(select(&two, Some("B")).is_err()); // found by serial, but doesn't answer
-        let silent = [monitor("DP-1", "AOC", "A", None)];
-        assert!(select(&silent, None).is_err());
+        let mut busy = monitor("DP-1", "AOC", "A", None);
+        busy.error = Some("/dev/i2c-8 is busy (locked by another program)".into());
+        let err = select(std::slice::from_ref(&busy), None).unwrap_err();
+        assert!(err.contains("is busy"), "{err}");
     }
 }

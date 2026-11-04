@@ -10,7 +10,9 @@ pub const SYSFS_DRM: &str = "/sys/class/drm";
 
 #[derive(Debug, Clone)]
 pub struct Connector {
-    /// e.g. "DP-1" (the card prefix is dropped).
+    /// Unique sysfs name, e.g. "card1-DP-1".
+    pub id: String,
+    /// Short name shown to users, e.g. "DP-1" (may repeat across GPUs).
     pub name: String,
     pub edid: Edid,
     /// i2c bus numbers to try, best first: a child i2c-N (DP AUX), then the `ddc` link.
@@ -42,6 +44,7 @@ pub fn connectors(root: &Path) -> Vec<Connector> {
             continue;
         };
         found.push(Connector {
+            id: dir.to_string(),
             name: name.to_string(),
             edid,
             buses: buses(&path),

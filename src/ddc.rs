@@ -16,6 +16,9 @@ const AOC_PAGE: [u8; 2] = [0xF8, 0xE1];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum DdcError {
+    /// Couldn't open or claim the device: no permission, busy, or a kernel driver owns it.
+    #[error("{0}")]
+    Access(String),
     #[error("i2c error: {0}")]
     Io(String),
     #[error("monitor sent no reply")]
@@ -223,15 +226,26 @@ impl<T: Transport> Ddc<T> {
     /// Reads the capabilities string in fragments (`F3 off`, reply `E3 off data..`).
     pub fn capabilities(&mut self) -> Result<String, DdcError> {
         let mut out = Vec::new();
+        let mut stale = 0;
         loop {
             let [hi, lo] = (out.len() as u16).to_be_bytes();
             let p = self.request(&[0xF3, hi, lo], 35)?;
             if p.len() < 3 || p[0] != 0xE3 {
                 return Err(DdcError::Malformed(hex(&p)));
             }
-            if u16::from_be_bytes([p[1], p[2]]) as usize != out.len() {
-                continue; // fragment for a different offset; ask again
+            let offset = u16::from_be_bytes([p[1], p[2]]);
+            if offset as usize != out.len() {
+                // Fragment for a different offset; ask again, but not forever.
+                stale += 1;
+                if stale >= self.attempts {
+                    return Err(DdcError::Malformed(format!(
+                        "capabilities fragment at offset {offset}, expected {}",
+                        out.len()
+                    )));
+                }
+                continue;
             }
+            stale = 0;
             let data = &p[3..];
             if data.is_empty() {
                 break;
@@ -376,6 +390,17 @@ mod tests {
         let mut f = Fake::default();
         f.reply(&[0x02, 0x01, 0x99, 0x00, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(ddc(f).get_vcp(0x99), Err(DdcError::Unsupported(0x99)));
+    }
+
+    #[test]
+    fn capabilities_gives_up_on_repeated_wrong_offsets() {
+        let mut f = Fake::default();
+        for _ in 0..5 {
+            f.reply(&[0xE3, 0x00, 0x20, b'x']);
+        }
+        let mut d = ddc(f);
+        assert!(matches!(d.capabilities(), Err(DdcError::Malformed(_))));
+        assert_eq!(d.transport.writes.len(), 3);
     }
 
     #[test]
