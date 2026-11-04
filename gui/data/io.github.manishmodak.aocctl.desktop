@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=aocctl
+GenericName=Monitor Settings
+Comment=Change your AOC monitor's settings, including the ones only AOC's G-Menu offers
+Exec=aocctl-gtk
+Icon=io.github.manishmodak.aocctl
+Terminal=false
+Categories=Settings;HardwareSettings;GTK;
+Keywords=AOC;monitor;display;brightness;contrast;overdrive;low blue;DDC;G-Menu;
+StartupNotify=true

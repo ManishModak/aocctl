@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.manishmodak.aocctl</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>aocctl</name>
+  <summary>Change AOC monitor settings</summary>
+  <developer id="io.github.manishmodak">
+    <name>Manish Modak</name>
+  </developer>
+  <description>
+    <p>
+      Change your AOC monitor's settings from Linux, including the ones that normally need
+      AOC's Windows app (G-Menu): shadow control, game color, overdrive, Low Blue, Eco mode and more.
+    </p>
+    <p>
+      It talks to the monitor over DDC/CI, checks every change by reading it back, and keeps
+      presets you can apply in one click. It's an independent project, not made or endorsed by AOC.
+    </p>
+    <p>
+      Supported models get all their settings; other AOC monitors get brightness and contrast
+      until their model is added.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.manishmodak.aocctl.desktop</launchable>
+  <url type="homepage">https://github.com/ManishModak/aocctl</url>
+  <url type="bugtracker">https://github.com/ManishModak/aocctl/issues</url>
+  <url type="vcs-browser">https://github.com/ManishModak/aocctl</url>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>Settings</category>
+    <category>HardwareSettings</category>
+  </categories>
+  <keywords>
+    <keyword>AOC</keyword>
+    <keyword>monitor</keyword>
+    <keyword>brightness</keyword>
+    <keyword>DDC/CI</keyword>
+  </keywords>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <releases>
+    <release version="0.1.0" date="2026-11-04">
+      <description>
+        <p>First release of the desktop app.</p>
+      </description>
+    </release>
+  </releases>
+</component>

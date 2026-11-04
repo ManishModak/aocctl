@@ -10,9 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install GTK 4 and libadwaita for the desktop app, and its data file validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev desktop-file-utils appstream
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Validate the desktop file and AppStream metainfo
+        run: |
+          desktop-file-validate gui/data/io.github.manishmodak.aocctl.desktop
+          appstreamcli validate --no-net gui/data/io.github.manishmodak.aocctl.metainfo.xml

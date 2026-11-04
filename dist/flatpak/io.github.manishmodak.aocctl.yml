@@ -1,0 +1,42 @@
+# Flatpak build of the aocctl desktop app (aocctl-gtk). Build from the repository root:
+#   python3 flatpak-cargo-generator.py Cargo.lock -o dist/flatpak/cargo-sources.json
+#   flatpak run org.flatpak.Builder --user --install --force-clean build-flatpak dist/flatpak/io.github.manishmodak.aocctl.yml
+# (flatpak-cargo-generator.py is from github.com/flatpak/flatpak-builder-tools; rerun it after Cargo.lock changes.)
+id: io.github.manishmodak.aocctl
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: aocctl-gtk
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # The monitor's DDC/CI bus is a /dev/i2c-N device, and Flatpak has no narrower permission
+  # that exposes it (this also covers the GPU). The host still decides who may open it: the
+  # udev rule or i2c group from the README is needed as without Flatpak.
+  - --device=all
+  # Presets, shared with the aocctl command and desktop widgets (~/.config/aocctl/presets.toml).
+  - --filesystem=xdg-config/aocctl:create
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/aocctl/cargo
+modules:
+  - name: aocctl
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked -p aocctl-gtk
+      - install -Dm755 target/release/aocctl-gtk -t /app/bin/
+      - install -Dm644 gui/data/io.github.manishmodak.aocctl.desktop -t /app/share/applications/
+      - install -Dm644 gui/data/io.github.manishmodak.aocctl.metainfo.xml -t /app/share/metainfo/
+      - install -Dm644 gui/data/icons/hicolor/scalable/apps/io.github.manishmodak.aocctl.svg -t /app/share/icons/hicolor/scalable/apps/
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - build-flatpak
+          - .flatpak-builder
+      - cargo-sources.json
