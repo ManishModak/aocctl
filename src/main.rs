@@ -79,7 +79,8 @@ fn main() -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
-            if cli.json {
+            // verify's output is always JSON, since it's pasted into an issue.
+            if cli.json || matches!(cli.cmd, Cmd::Verify { .. }) {
                 println!("{}", json!({ "schema": 1, "error": e }));
             }
             eprintln!("aocctl: {e}");
@@ -332,12 +333,14 @@ fn verify_cmd(root: &Path, m: &Monitor, id: &str, confirm: bool) -> Result<bool,
     }
     let mut ddc = m.open().map_err(|e| e.to_string())?;
     let name = &m.connector.name;
-    let hold = HoldSignals::new();
+    // Taken right before the test write and held until the report is out.
+    let mut hold = None;
     let v = verify::verify(
         &mut ddc,
         s,
         || monitor::recheck(root, m),
         |before, test| {
+            hold = Some(HoldSignals::new());
             eprintln!(
                 "aocctl: {name}: {} is {before}; writing {test}, then restoring {before}",
                 s.id
@@ -416,7 +419,12 @@ fn verify_summary(m: &Monitor, s: &Setting, v: &Verification) {
             "aocctl: {} failed: {} didn't read back; {before} is restored",
             s.id, v.test.value
         ),
-        Outcome::RestoreUnconfirmed | Outcome::RestoreSkipped => {
+        Outcome::RestoreSkipped => eprintln!(
+            "aocctl: WARNING: the monitor on {} changed during the test, so {} wasn't restored. \
+             On the original monitor, set it back to {before} in its on-screen menu.",
+            m.connector.name, s.id
+        ),
+        Outcome::RestoreUnconfirmed => {
             eprintln!(
                 "aocctl: WARNING: couldn't confirm {} is back at {before}. Set it back in the monitor's on-screen menu.",
                 s.id
@@ -424,7 +432,7 @@ fn verify_summary(m: &Monitor, s: &Setting, v: &Verification) {
             if s.verified_write {
                 eprintln!(
                     "aocctl: or run: aocctl set {} {} --display {}",
-                    s.id, v.before.value, m.connector.name
+                    s.id, v.before.value, m.connector.id
                 );
             }
         }

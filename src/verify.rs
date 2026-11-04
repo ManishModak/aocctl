@@ -145,7 +145,11 @@ pub fn verify<T: Transport>(
 
     let test = step(ddc, setting, test);
     let restore = recheck().map(|()| step(ddc, setting, before.value));
-    let game_mode_after = ddc.get_vcp(GAME_MODE).ok().map(|r| r.value);
+    // A changed identity means another monitor may be listening now: send nothing more.
+    let game_mode_after = match restore {
+        Ok(_) => ddc.get_vcp(GAME_MODE).ok().map(|r| r.value),
+        Err(_) => None,
+    };
     let outcome = match &restore {
         Err(_) => Outcome::RestoreSkipped,
         Ok(r) if !r.confirmed() => Outcome::RestoreUnconfirmed,
@@ -312,6 +316,10 @@ mod tests {
         let v = verify(&mut d, &SHADOW, recheck, |_, _| {}).unwrap();
         assert_eq!(v.outcome, Outcome::RestoreSkipped);
         assert_eq!(sets(&d), vec![set(49)]);
+        // The test write's fresh read-back (marker + get) is the last thing sent.
+        let writes = &d.transport().writes;
+        assert_eq!(writes[writes.len() - 3], set(49));
+        assert_eq!(v.game_mode_after, None);
     }
 
     #[test]
