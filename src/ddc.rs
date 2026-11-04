@@ -163,10 +163,17 @@ impl<T: Transport> Ddc<T> {
         Err(last)
     }
 
+    /// Sends a set once. Waits the settle time even when the write reports an
+    /// error, since the monitor may have taken the packet anyway.
     fn send(&mut self, payload: &[u8]) -> Result<(), DdcError> {
-        self.transport.write(&encode(payload))?;
+        let sent = self.transport.write(&encode(payload));
         sleep(self.timing.after_set);
-        Ok(())
+        sent
+    }
+
+    /// Short wait between read-only polls of a value that may still be settling.
+    pub fn pause(&self) {
+        sleep(self.timing.retry);
     }
 
     /// Reads a standard VCP feature. Reply: `02 rc code type mh ml sh sl`.
@@ -272,6 +279,8 @@ pub mod fake {
     pub struct Fake {
         pub writes: Vec<Vec<u8>>,
         pub replies: VecDeque<Vec<u8>>,
+        /// Writes (by index) that are recorded but report an i2c error.
+        pub failing_writes: Vec<usize>,
     }
 
     impl Fake {
@@ -293,6 +302,9 @@ pub mod fake {
     impl Transport for Fake {
         fn write(&mut self, bytes: &[u8]) -> Result<(), DdcError> {
             self.writes.push(bytes.to_vec());
+            if self.failing_writes.contains(&(self.writes.len() - 1)) {
+                return Err(DdcError::Io("injected write error".into()));
+            }
             Ok(())
         }
         fn read(&mut self, buf: &mut [u8]) -> Result<(), DdcError> {

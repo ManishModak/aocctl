@@ -9,3 +9,4 @@ pub mod i2c;
 pub mod models;
 pub mod monitor;
 pub mod presets;
+pub mod verify;

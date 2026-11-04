@@ -1,0 +1,32 @@
+name: Write verification
+description: Report an `aocctl verify` run, so a setting can be made writable for your model
+title: "Write verification: AOC <model> <setting>"
+labels: [write-verification]
+body:
+  - type: textarea
+    id: report
+    attributes:
+      label: Output of `aocctl verify <setting> --confirm-write`
+      description: Paste the JSON report. One setting per issue, or several reports in one block.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: osd
+    attributes:
+      label: The setting in your monitor's on-screen menu
+      description: Its name and every option or range it shows, e.g. "Overdrive - Off, Weak, Medium, Strong, Boost".
+    validations:
+      required: true
+  - type: textarea
+    id: screen
+    attributes:
+      label: What you saw during the test
+      description: Did the menu value or the picture change, and was it back to normal afterwards?
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: GPU, driver and connection
+      placeholder: e.g. AMD RX 7800 XT, amdgpu, DisplayPort
