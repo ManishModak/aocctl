@@ -101,6 +101,12 @@ carries `"schema": 1`; a failed command exits non-zero and prints
 `{"schema": 1, "error": "..."}`. After a write, aocctl reads the value back and
 reports `verified`, `mismatch` or `unknown`; only `verified` exits 0.
 
+`get --json` lists each setting as `{"id", "name", "value", "max", "label",
+"writable", "domain"}` (with `error` in place of the reading when it fails).
+`domain` is `{"min", "max"}` for a number or `{"options": [...]}` for a choice
+(the value is the option's index), so a widget can build its controls for any
+model.
+
 When more than one AOC monitor is connected, `--display` is required.
 
 ### Presets
@@ -154,6 +160,16 @@ With `--json`, `list` prints `{"schema": 1, "presets": [{"name", "settings":
 - While `hdr-mode` is on, the 24G4 doesn't accept changes to shadow control,
   game color or Low Blue, so a preset that turns HDR mode on and also sets
   them reports `mismatch`.
+
+## Desktop widgets
+
+- **Noctalia**: a bar widget with the monitor's brightness (scroll to change
+  it) and a panel with every setting and your presets. Copy
+  [`integrations/noctalia/aocctl`](integrations/noctalia/aocctl) to
+  `~/.local/share/noctalia/plugins/aocctl`, run
+  `noctalia msg plugins enable manishmodak/aocctl`, then add the `brightness`
+  widget to your bar. Its [README](integrations/noctalia/aocctl/README.md)
+  has the details.
 
 ## Add your monitor
 
