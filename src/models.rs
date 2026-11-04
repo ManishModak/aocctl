@@ -182,6 +182,11 @@ pub const PROFILES: &[Profile] = &[Profile {
     ],
 }];
 
+/// Settings that switch a picture mode, in the order presets write them. A mode switch can
+/// swap in that mode's own values (on the 24G4, HDR mode changes brightness and DCR on sets
+/// Eco to a DCR-only value), so presets write these first and everything else after.
+pub const MODE_SETTINGS: &[&str] = &["dcr", "eco", "hdr-mode", "low-blue"];
+
 pub fn is_aoc(edid: &Edid) -> bool {
     edid.mfg == "AOC"
 }

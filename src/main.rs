@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::process::ExitCode;
 
+mod preset_cli;
+
 #[derive(Parser)]
 #[command(name = "aocctl", version, about = "Control AOC monitor settings over DDC/CI")]
 struct Cli {
@@ -38,6 +40,14 @@ enum Cmd {
         value: String,
         /// Connector name (e.g. DP-1) or serial number.
         #[arg(long)]
+        display: Option<String>,
+    },
+    /// Save, list, apply and delete presets: named sets of setting values.
+    Preset {
+        #[command(subcommand)]
+        cmd: preset_cli::PresetCmd,
+        /// Connector name (e.g. DP-1) or serial number.
+        #[arg(long, global = true)]
         display: Option<String>,
     },
     /// Print a JSON report about the monitor, to attach to a model support request.
@@ -87,6 +97,9 @@ fn run(cli: &Cli) -> Result<bool, String> {
             setting,
             value,
         ),
+        Cmd::Preset { cmd, display } => {
+            preset_cli::run(cli.json, root, monitor::select(&monitors, display.as_deref())?, cmd)
+        }
         Cmd::Probe { aoc_items, display } => {
             probe(monitor::select(&monitors, display.as_deref())?, *aoc_items)?;
             Ok(true)
