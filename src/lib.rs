@@ -8,3 +8,4 @@ pub mod edid;
 pub mod i2c;
 pub mod models;
 pub mod monitor;
+pub mod presets;

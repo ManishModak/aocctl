@@ -50,6 +50,11 @@ aocctl get overdrive shadow-control
 aocctl set overdrive medium         # values by name or number
 aocctl set shadow-control 55
 aocctl set low-blue office --display DP-1   # pick a monitor by connector or serial
+
+aocctl preset save gaming           # save the monitor's current settings as a preset
+aocctl preset save night brightness=10 low-blue=office   # or give the values
+aocctl preset apply night
+aocctl preset list
 ```
 
 Every command takes `--json` for scripts and desktop widgets. JSON output
@@ -59,13 +64,57 @@ reports `verified`, `mismatch` or `unknown`; only `verified` exits 0.
 
 When more than one AOC monitor is connected, `--display` is required.
 
+### Presets
+
+A preset is a named set of values for your monitor model. `aocctl preset`
+takes `save`, `list`, `show`, `apply` and `delete`:
+
+- `preset save <name>` captures the monitor's current values of every setting
+  aocctl can write (or only `--only brightness,low-blue`), replacing that
+  preset's values. Values aocctl can't set back are left out and reported
+  (on the 24G4, Eco reads a DCR-only value while DCR is on).
+- `preset save <name> setting=value ...` doesn't read the monitor: it adds
+  those values to the preset, creating it if needed.
+- `preset apply <name>` writes only the values that differ, mode settings
+  (DCR, Eco, HDR mode, Low Blue) first because they change other settings,
+  then reads every value back. Each setting reports `unchanged`, `verified`,
+  `mismatch`, `unknown` or `error`; only `unchanged` and `verified` exit 0.
+
+Presets live in `~/.config/aocctl/presets.toml` (`$XDG_CONFIG_HOME` is
+respected). You can edit it by hand, and aocctl keeps your comments:
+
+```toml
+[[preset]]
+name = "Night"
+mfg = "AOC"
+model = "24G4"
+product-code = "b401"
+
+[preset.settings]
+brightness = 10
+low-blue = "office"
+```
+
+A preset belongs to one model (EDID manufacturer, product code and model
+name) and is never listed for or applied to another. Every value is checked
+like `aocctl set` checks it; a preset with a bad value is listed with its
+`error` and never applied.
+
+With `--json`, `list` prints `{"schema": 1, "presets": [{"name", "settings":
+[{"id", "value", "label"}], "error"}]}`, and `apply` prints each setting's
+`status`, `read_back` and `error`.
+
 ### Notes on settings
 
 - `hdr-mode` is the monitor's own HDR-style picture processing. It doesn't turn
   on HDR output from your desktop.
 - Changing `shadow-control` or `game-color` switches the monitor out of its FPS
   and racing game modes. That is the monitor's behaviour; aocctl doesn't switch
-  the mode back.
+  the mode back. Applying a preset leaves values that are already set alone,
+  so it only does this when the preset changes one of them.
+- While `hdr-mode` is on, the 24G4 doesn't accept changes to shadow control,
+  game color or Low Blue, so a preset that turns HDR mode on and also sets
+  them reports `mismatch`.
 
 ## Add your monitor
 
