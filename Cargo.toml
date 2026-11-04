@@ -16,3 +16,4 @@ libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
+toml_edit = "0.25.18"
