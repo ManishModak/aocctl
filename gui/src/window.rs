@@ -51,6 +51,8 @@ pub struct Window {
     settings_page: adw::PreferencesPage,
     presets_group: adw::PreferencesGroup,
     jobs: mpsc::Sender<Job>,
+    /// Id of the last write request sent.
+    last_write: Cell<u64>,
     state: RefCell<State>,
 }
 
@@ -143,6 +145,7 @@ impl Window {
             settings_page,
             presets_group,
             jobs,
+            last_write: Cell::new(0),
             state: RefCell::default(),
         });
         let weak = Rc::downgrade(&win);
@@ -210,9 +213,9 @@ impl Window {
             Reply::Written {
                 connector,
                 setting,
-                value,
+                id,
                 result,
-            } if self.is_current(&connector) => self.written(setting, value, result),
+            } if self.is_current(&connector) => self.written(setting, id, result),
             Reply::Presets { connector, result } if self.is_current(&connector) => self.show_presets(result),
             Reply::Saved { connector, result } if self.is_current(&connector) => self.saved(result),
             Reply::Applied {
@@ -406,17 +409,22 @@ impl Window {
         for g in old {
             self.settings_page.remove(&g);
         }
+        // Rows write to the monitor they were built for, even if another is picked meanwhile.
+        let built_for = self.current();
         let weak = Rc::downgrade(self);
         let on_change: OnChange = Rc::new(move |setting, value| {
-            if let Some(w) = weak.upgrade()
-                && let Some(monitor) = w.current()
-            {
-                w.send(Job::Write {
-                    monitor,
-                    setting,
-                    value,
-                });
-            }
+            let (Some(w), Some(monitor)) = (weak.upgrade(), built_for.clone()) else {
+                return 0;
+            };
+            let id = w.last_write.get() + 1;
+            w.last_write.set(id);
+            w.send(Job::Write {
+                monitor,
+                setting,
+                value,
+                id,
+            });
+            id
         });
         // (group, position in it) of a setting; settings in no group go last, in model order.
         let place = |id: &str| {
@@ -471,7 +479,7 @@ impl Window {
         st.rows = rows;
     }
 
-    fn written(&self, setting: &'static Setting, value: u16, result: Result<WriteStatus, String>) {
+    fn written(&self, setting: &'static Setting, id: u64, result: Result<WriteStatus, String>) {
         let row = self
             .state
             .borrow()
@@ -479,7 +487,7 @@ impl Window {
             .iter()
             .find(|r| r.setting.id == setting.id)
             .cloned();
-        if !row.is_some_and(|r| r.written(value, &result)) {
+        if !row.is_some_and(|r| r.written(id, &result)) {
             return;
         }
         if let Err(e) = &result {

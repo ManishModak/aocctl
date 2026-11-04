@@ -14,8 +14,9 @@ use std::time::Duration;
 /// How long a slider must rest before its value is written.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Called with a value the user picked; the window sends it to the worker.
-pub type OnChange = Rc<dyn Fn(&'static Setting, u16)>;
+/// Called with a value the user picked; the window sends it to the worker and returns the
+/// request's id, which comes back with its result.
+pub type OnChange = Rc<dyn Fn(&'static Setting, u16) -> u64>;
 
 pub struct SettingRow {
     pub setting: &'static Setting,
@@ -26,8 +27,8 @@ pub struct SettingRow {
     spinner: gtk::Spinner,
     /// Set while the code (not the user) moves the control, so that doesn't write.
     suppress: Cell<bool>,
-    /// The value last sent whose result hasn't come back yet.
-    wanted: Cell<Option<u16>>,
+    /// The request id and value last sent, until its result comes back.
+    wanted: Cell<Option<(u64, u16)>>,
     /// The value the result icon is about; a reading of another value hides the icon.
     status_for: Cell<Option<u16>>,
     debounce: RefCell<Option<glib::SourceId>>,
@@ -166,17 +167,20 @@ impl SettingRow {
     }
 
     fn send(&self, value: u16) {
-        self.wanted.set(Some(value));
         self.status.set_visible(false);
         self.spinner.set_visible(true);
         self.spinner.start();
-        (self.on_change)(self.setting, value);
+        let id = (self.on_change)(self.setting, value);
+        self.wanted.set(Some((id, value)));
     }
 
-    /// Shows a write's result. Returns false if a newer value is already on its way,
+    /// Shows the result of request `id`. Returns false if a newer value is already on its way,
     /// in which case this result is stale and ignored.
-    pub fn written(&self, value: u16, result: &Result<WriteStatus, String>) -> bool {
-        if self.wanted.get() != Some(value) || self.debounce.borrow().is_some() {
+    pub fn written(&self, id: u64, result: &Result<WriteStatus, String>) -> bool {
+        let Some((_, value)) = self.wanted.get().filter(|(w, _)| *w == id) else {
+            return false;
+        };
+        if self.debounce.borrow().is_some() {
             return false;
         }
         self.wanted.set(None);

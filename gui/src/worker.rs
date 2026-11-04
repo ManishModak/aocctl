@@ -21,6 +21,8 @@ pub enum Job {
         monitor: Monitor,
         setting: &'static Setting,
         value: u16,
+        /// Identifies this request in its reply.
+        id: u64,
     },
     ListPresets(Monitor),
     SavePreset {
@@ -48,7 +50,7 @@ pub enum Reply {
     Written {
         connector: String,
         setting: &'static Setting,
-        value: u16,
+        id: u64,
         result: Result<WriteStatus, String>,
     },
     Presets {
@@ -93,16 +95,25 @@ pub fn run(jobs: Receiver<Job>, replies: async_channel::Sender<Reply>) {
     }
 }
 
-/// A write is skipped when a later write of the same setting on the same monitor is
-/// already queued: only the newest value matters, and each write takes about half a second.
+/// A write is skipped when a later write of the same setting on the same monitor is queued
+/// right behind it, with only other writes in between: only the newest value matters, and each
+/// write takes about half a second. Any other job in between (a preset save, say) must see it.
 fn superseded(job: &Job, queue: &VecDeque<Job>) -> bool {
     let Job::Write { monitor, setting, .. } = job else {
         return false;
     };
-    queue.iter().any(|later| {
-        matches!(later, Job::Write { monitor: m, setting: s, .. }
-            if m.connector.id == monitor.connector.id && s.id == setting.id)
-    })
+    for later in queue {
+        let Job::Write {
+            monitor: m, setting: s, ..
+        } = later
+        else {
+            return false;
+        };
+        if m.connector.id == monitor.connector.id && s.id == setting.id {
+            return true;
+        }
+    }
+    false
 }
 
 fn handle(root: &Path, job: Job) -> Reply {
@@ -116,11 +127,12 @@ fn handle(root: &Path, job: Job) -> Reply {
             monitor: m,
             setting,
             value,
+            id,
         } => Reply::Written {
             result: write(root, &m, setting, value),
             connector: m.connector.id,
             setting,
-            value,
+            id,
         },
         Job::ListPresets(m) => Reply::Presets {
             result: list_presets(&m),
@@ -237,6 +249,7 @@ mod tests {
             monitor: monitor(id),
             setting: &COMMON[setting],
             value,
+            id: value.into(),
         }
     }
 
@@ -249,6 +262,9 @@ mod tests {
         assert!(!superseded(&write("card1-DP-2", 0, 20), &queue));
         let other: VecDeque<Job> = [write("card1-DP-1", 1, 40), Job::Discover].into();
         assert!(!superseded(&write("card1-DP-1", 0, 20), &other));
+        // A job in between (e.g. a preset save) must see the older value written first.
+        let between: VecDeque<Job> = [Job::Discover, write("card1-DP-1", 0, 30)].into();
+        assert!(!superseded(&write("card1-DP-1", 0, 20), &between));
         assert!(!superseded(&Job::Discover, &queue));
     }
 }
