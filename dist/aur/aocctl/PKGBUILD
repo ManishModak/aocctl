@@ -1,0 +1,42 @@
+# Maintainer: Manish Modak <https://github.com/ManishModak>
+# Builds the tagged release from source. Update pkgver, then run `updpkgsums`.
+pkgname=aocctl
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Control AOC monitor settings over DDC/CI, including AOC-only settings'
+arch=('x86_64' 'aarch64')
+url='https://github.com/ManishModak/aocctl'
+license=('MIT OR Apache-2.0')
+depends=('glibc' 'libgcc' 'sh')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/aocctl -t "$pkgdir/usr/bin/"
+  install -Dm644 dist/udev/60-aocctl-ddc-i2c.rules -t "$pkgdir/usr/lib/udev/rules.d/"
+  install -Dm755 dist/udev/aocctl-ddc-bus -t "$pkgdir/usr/lib/udev/"
+  install -Dm644 dist/modules-load.d/aocctl.conf -t "$pkgdir/usr/lib/modules-load.d/"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 LICENSE-MIT LICENSE-APACHE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

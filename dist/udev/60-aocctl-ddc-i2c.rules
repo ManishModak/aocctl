@@ -1,0 +1,15 @@
+# aocctl: give the user logged in at the seat (uaccess) read/write access to the
+# i2c-dev nodes of monitor DDC/CI buses only: the buses of external DRM connectors
+# (see aocctl-ddc-bus). GPU management buses (e.g. "AMDGPU SMU"), SMBus/RAM SPD
+# and sensor buses stay root-only, unlike rules that match every bus of a GPU.
+
+ACTION=="remove", GOTO="aocctl_end"
+
+SUBSYSTEM=="i2c-dev", KERNEL=="i2c-[0-9]*", PROGRAM="/usr/lib/udev/aocctl-ddc-bus %S%p", TAG+="uaccess"
+
+# A connector creates its `ddc` link after the bus exists, then the card sends a
+# hotplug event; check the i2c-dev nodes again then.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ACTION=="change", ENV{HOTPLUG}=="1", \
+  RUN+="/usr/bin/udevadm trigger --action=change --subsystem-match=i2c-dev"
+
+LABEL="aocctl_end"
