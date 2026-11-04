@@ -274,16 +274,12 @@ impl Store {
         let stored_name = match found.first() {
             Some(&i) => {
                 let t = arr.get_mut(i).expect("index from matches");
-                match t.get_mut("settings").and_then(Item::as_table_like_mut) {
-                    Some(existing) if merge => {
-                        for (s, v) in values {
-                            existing.insert(s.id, Item::Value(stored(s, *v)));
-                        }
-                    }
-                    _ => {
-                        t.insert("settings", settings_table(values));
-                    }
-                }
+                let settings = t
+                    .entry("settings")
+                    .or_insert(settings_table(&[]))
+                    .as_table_like_mut()
+                    .expect("checked on load");
+                update(settings, values, merge);
                 t["name"].as_str().unwrap_or(name).to_string()
             }
             None => {
@@ -416,6 +412,33 @@ fn read_values(key: &ModelKey, name: &str, t: &Table) -> Preset {
     p
 }
 
+/// Writes `values` into a stored settings table, keeping the comments around values that
+/// stay. Without `merge`, settings not in `values` are removed.
+fn update(settings: &mut dyn TableLike, values: &[(&'static Setting, u16)], merge: bool) {
+    if !merge {
+        let stale: Vec<String> = settings
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .filter(|k| !values.iter().any(|(s, _)| s.id == k))
+            .collect();
+        for k in stale {
+            settings.remove(&k);
+        }
+    }
+    for (s, v) in values {
+        let mut new = stored(s, *v);
+        match settings.get_mut(s.id) {
+            Some(Item::Value(old)) => {
+                *new.decor_mut() = old.decor().clone();
+                *old = new;
+            }
+            _ => {
+                settings.insert(s.id, Item::Value(new));
+            }
+        }
+    }
+}
+
 fn settings_table(values: &[(&'static Setting, u16)]) -> Item {
     let mut t = Table::new();
     for (s, v) in values {
@@ -517,7 +540,8 @@ pub fn apply_order(values: &[(&'static Setting, u16)]) -> Vec<(&'static Setting,
 
 /// Writes a preset's values over an open (locked) connection: each value that differs
 /// is written once and read back, in [`apply_order`]. If anything was written, every
-/// value is read again at the end, since a mode switch can change values set before it.
+/// value is read again at the end, since a mode switch can change values set before it,
+/// and that final reading decides its outcome.
 pub fn apply<T: Transport>(
     ddc: &mut Ddc<T>,
     values: &[(&'static Setting, u16)],
@@ -541,12 +565,14 @@ pub fn apply<T: Transport>(
         out.push((s, v, outcome));
     }
     if wrote {
-        for (s, v, outcome) in out.iter_mut().filter(|(_, _, o)| o.ok()) {
-            match monitor::read(ddc, s) {
-                Ok(r) if r.value == *v => {}
-                Ok(r) => *outcome = Outcome::Mismatch(r.value),
-                Err(e) => *outcome = Outcome::Unknown(e.to_string()),
-            }
+        // The final reading decides, except for values that were never read or sent.
+        for (s, v, outcome) in out.iter_mut().filter(|(_, _, o)| !matches!(o, Outcome::Failed(_))) {
+            *outcome = match (monitor::read(ddc, s), &outcome) {
+                (Ok(r), Outcome::Unchanged) if r.value == *v => Outcome::Unchanged,
+                (Ok(r), _) if r.value == *v => Outcome::Verified,
+                (Ok(r), _) => Outcome::Mismatch(r.value),
+                (Err(e), _) => Outcome::Unknown(e.to_string()),
+            };
         }
     }
     out
@@ -677,6 +703,22 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
     }
 
     #[test]
+    fn put_keeps_comments_on_values_it_changes() {
+        let mut s = store(
+            "[[preset]]\nname = 'Night'\nmfg = 'AOC'\nmodel = '24G4'\nproduct-code = 'b401'\n\n\
+             [preset.settings]\n# dim\nbrightness = 10 # night\nlow-blue = 'office'\n",
+        );
+        s.put(&key(), "Night", &[(set("brightness"), 12)], true).unwrap();
+        let text = s.doc.to_string();
+        assert!(text.contains("# dim\nbrightness = 12 # night"), "{text}");
+        assert!(text.contains("low-blue"), "{text}");
+        s.put(&key(), "Night", &[(set("brightness"), 15)], false).unwrap();
+        let text = s.doc.to_string();
+        assert!(text.contains("# dim\nbrightness = 15 # night"), "{text}");
+        assert!(!text.contains("low-blue"), "{text}");
+    }
+
+    #[test]
     fn a_new_file_gets_a_header_and_reloads() {
         let mut s = store("");
         s.put(&key(), "Day", &[(set("brightness"), 40)], false).unwrap();
@@ -724,6 +766,9 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
         state: Vec<(Code, u16, u16)>,
         effects: Vec<(Code, Code, u16)>,
         stuck: Vec<Code>,
+        /// Settings whose first read after a write still shows the old value.
+        slow: Vec<Code>,
+        stale: Vec<(Code, u16)>,
         sets: Vec<(Code, u16)>,
         replies: Fake,
     }
@@ -761,7 +806,10 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
             };
             match rest {
                 (0x01, []) => {
-                    let &(_, v, max) = self.state.iter().find(|(c, ..)| *c == code).unwrap();
+                    let &(_, mut v, max) = self.state.iter().find(|(c, ..)| *c == code).unwrap();
+                    if let Some(i) = self.stale.iter().position(|(c, _)| *c == code) {
+                        v = self.stale.remove(i).1;
+                    }
                     let [mh, ml] = max.to_be_bytes();
                     let [vh, vl] = v.to_be_bytes();
                     match code {
@@ -772,6 +820,10 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
                 (0x03, [hi, lo]) => {
                     let v = u16::from_be_bytes([*hi, *lo]);
                     self.sets.push((code, v));
+                    if self.slow.contains(&code) {
+                        let old = self.state.iter().find(|(c, ..)| *c == code).unwrap().1;
+                        self.stale.push((code, old));
+                    }
                     if !self.stuck.contains(&code) {
                         self.store(code, v);
                     }
@@ -840,6 +892,15 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
         assert_eq!(out, vec![("shadow-control", Outcome::Mismatch(0))]);
         assert!(!out[0].1.ok());
         assert_eq!(sim.sets.len(), 1);
+    }
+
+    #[test]
+    fn apply_trusts_the_final_reading_over_a_slow_first_read_back() {
+        let mut sim = Sim::with(&[("brightness", 20)]);
+        sim.slow.push(set("brightness").code);
+        let (out, ddc) = run(sim, &[("brightness", 30)]);
+        assert_eq!(out, vec![("brightness", Outcome::Verified)]);
+        assert_eq!(ddc.transport().sets.len(), 1);
     }
 
     #[test]
