@@ -188,6 +188,13 @@ With `--json`, `list` prints `{"schema": 1, "presets": [{"name", "settings":
   `noctalia msg plugins enable manishmodak/aocctl`, then add the `brightness`
   widget to your bar. Its [README](integrations/noctalia/aocctl/README.md)
   has the details.
+- **KDE Plasma 6**: a panel widget with brightness (scroll to change it) and a
+  popup with every setting and your presets.
+  [Install and usage](integrations/kde/README.md).
+- **GNOME Shell 46+**: a brightness slider in Quick Settings, with your presets
+  in its menu. [Install and usage](integrations/gnome/README.md).
+- **Waybar**: a module with brightness on the bar (scroll to change it) and a
+  preset menu on click. [Install and usage](integrations/waybar/README.md).
 
 ## Add your monitor
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="aocctlPath" type="String">
+      <label>Command that runs aocctl</label>
+      <default>aocctl</default>
+    </entry>
+    <entry name="display" type="String">
+      <label>Connector or serial of the monitor; empty for the only AOC monitor</label>
+      <default></default>
+    </entry>
+  </group>
+</kcfg>
