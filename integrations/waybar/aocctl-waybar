@@ -94,16 +94,21 @@ adjust() {
 # Writes the newest target. Every scroll starts one flush; they take turns on the
 # writer lock, so a flush that finds no target (an earlier one wrote it) does nothing.
 flush() {
-    local target out
     exec 8>"$state/writer"
     flock 8
+    write_target
+}
+
+# Sends the pending target, if any. Call it holding the writer lock (fd 8).
+write_target() {
+    local target out ok
     exec 9>"$state/lock"
     flock 9
     target=$(cat "$state/target" 2>/dev/null)
     flock -u 9
     [[ -n $target ]] || return 0
     out=$(run set brightness "$target")
-    local ok=$?
+    ok=$?
     flock 9
     # A newer target set during the write stays for the flush its scroll started.
     [[ $(cat "$state/target" 2>/dev/null) == "$target" ]] && rm -f "$state/target"
@@ -142,6 +147,11 @@ presets() {
     fi
     pick=$(menu <<<"$names") || return 0
     [[ -n $pick ]] || return 0
+    # Takes the writer lock like a flush, and sends a scroll made before the click first,
+    # so the preset lands after it and no older scroll lands after the preset.
+    exec 8>"$state/writer"
+    flock 8
+    write_target
     if ! out=$(run preset apply "$pick"); then
         failed=$(jq -r '[.settings[]? | select(.status != "unchanged" and .status != "verified") |
             "\(.id): \(.error // .status)"] | join("\n")' <<<"$out" 2>/dev/null)

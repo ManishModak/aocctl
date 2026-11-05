@@ -25,7 +25,7 @@ PlasmaExtras.Representation {
             PlasmaComponents3.BusyIndicator {
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                visible: root.loading || root.writing !== ""
+                visible: root.loading || root.inFlight !== null
             }
             PlasmaComponents3.ToolButton {
                 icon.name: "view-refresh"
@@ -80,7 +80,7 @@ PlasmaExtras.Representation {
                     model: root.presets
                     delegate: PlasmaComponents3.Button {
                         text: modelData.name
-                        enabled: !modelData.error && !root.loading
+                        enabled: !modelData.error
                         onClicked: root.applyPreset(modelData.name)
                         PlasmaComponents3.ToolTip.text: modelData.error
                             || modelData.settings.map(s => s.id + " " + (s.label || s.value)).join(", ")

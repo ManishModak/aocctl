@@ -37,6 +37,8 @@ async function aocctl(args, cancellable) {
     return data;
 }
 
+const isCancelled = e => e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED);
+
 const BrightnessSlider = GObject.registerClass(
 class BrightnessSlider extends QuickSlider {
     _init() {
@@ -45,6 +47,11 @@ class BrightnessSlider extends QuickSlider {
         this._range = {min: 0, max: 100};
         this._value = undefined;
         this._title = _('AOC Monitor');
+        // Why the last read, or the last change, failed. A change's error stays until a change succeeds.
+        this._readError = '';
+        this._writeError = '';
+        // Changes (slider writes, presets) run one at a time, in the order asked for.
+        this._queue = Promise.resolve();
         this._target = null;
         this._writing = false;
         this._timeoutId = 0;
@@ -52,7 +59,7 @@ class BrightnessSlider extends QuickSlider {
         this.slider.accessible_name = _('AOC monitor brightness');
         this._sliderId = this.slider.connect('notify::value', () => this._onMoved());
 
-        this._setError('');
+        this._showStatus();
         this._presets = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._presets);
         this.menu.connect('open-state-changed', (_menu, open) => {
@@ -68,10 +75,10 @@ class BrightnessSlider extends QuickSlider {
         });
     }
 
-    // Shows an error under the menu's title; '' clears it. The slider stays greyed out
-    // until brightness has been read once.
-    _setError(message) {
-        this.menu.setHeader('video-display-symbolic', this._title, message);
+    // Shows the current error under the menu's title. The slider stays greyed out until
+    // brightness has been read once.
+    _showStatus() {
+        this.menu.setHeader('video-display-symbolic', this._title, this._writeError || this._readError);
         this.slider.reactive = this._value !== undefined;
     }
 
@@ -83,6 +90,7 @@ class BrightnessSlider extends QuickSlider {
             const row = (await aocctl(['get', 'brightness'], this._cancellable)).settings[0];
             if (row.error)
                 throw new Error(row.error);
+            this._readError = '';
             if (this._writing || this._target !== null)
                 return;
             const domain = row.domain ?? {min: 0, max: row.max};
@@ -91,11 +99,17 @@ class BrightnessSlider extends QuickSlider {
             this.slider.block_signal_handler(this._sliderId);
             this.slider.value = (row.value - this._range.min) / Math.max(1, this._range.max - this._range.min);
             this.slider.unblock_signal_handler(this._sliderId);
-            this._setError('');
         } catch (e) {
-            if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                this._setError(e.message);
+            if (isCancelled(e))
+                return;
+            this._readError = e.message;
         }
+        this._showStatus();
+    }
+
+    // Runs fn after the changes already queued.
+    _enqueue(fn) {
+        this._queue = this._queue.then(fn).catch(logError);
     }
 
     _onMoved() {
@@ -105,14 +119,23 @@ class BrightnessSlider extends QuickSlider {
             GLib.source_remove(this._timeoutId);
         this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, WRITE_DELAY_MS, () => {
             this._timeoutId = 0;
-            this._write().catch(logError);
+            this._enqueue(() => this._write());
             return GLib.SOURCE_REMOVE;
         });
     }
 
-    // Sends the newest target; one write at a time, then the next target if the slider moved on.
+    // Queues the slider's newest value now instead of after the pause.
+    _flushMove() {
+        if (!this._timeoutId)
+            return;
+        GLib.source_remove(this._timeoutId);
+        this._timeoutId = 0;
+        this._enqueue(() => this._write());
+    }
+
+    // Sends the slider's newest value; a queued write that finds it already sent does nothing.
     async _write() {
-        if (this._writing || this._target === null)
+        if (this._target === null)
             return;
         const value = this._target;
         this._target = null;
@@ -121,20 +144,18 @@ class BrightnessSlider extends QuickSlider {
             const r = await aocctl(['set', 'brightness', String(value)], this._cancellable);
             if (r.status === 'verified') {
                 this._value = value;
-                this._setError('');
-            }
-            else {
-                this._setError(_('Sent %d%%, but the monitor reads %s').format(value, String(r.read_back ?? '?')));
+                this._writeError = '';
+            } else {
+                this._writeError = _('Sent %d%%, but the monitor reads %s').format(value, String(r.read_back ?? '?'));
             }
         } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+            if (isCancelled(e))
                 return;
-            this._setError(e.message);
+            this._writeError = e.message;
         } finally {
             this._writing = false;
         }
-        if (this._target !== null && !this._timeoutId)
-            await this._write();
+        this._showStatus();
     }
 
     async _loadPresets() {
@@ -143,12 +164,15 @@ class BrightnessSlider extends QuickSlider {
         try {
             data = await aocctl(['preset', 'list'], this._cancellable);
         } catch (e) {
-            if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                this._setError(e.message);
+            if (!isCancelled(e)) {
+                this._readError = e.message;
+                this._showStatus();
+            }
             return;
         }
         this._title = `${data.model} (${data.display})`;
-        this._setError('');
+        this._readError = '';
+        this._showStatus();
         this._presets.removeAll();
         if (data.presets.length === 0) {
             const item = new PopupMenu.PopupMenuItem(_('No presets yet. Save one with “aocctl preset save”.'));
@@ -159,24 +183,31 @@ class BrightnessSlider extends QuickSlider {
             const item = new PopupMenu.PopupMenuItem(preset.name);
             if (preset.error)
                 item.setSensitive(false);
-            item.connect('activate', () => this._apply(preset.name).catch(logError));
+            item.connect('activate', () => this._apply(preset.name));
             this._presets.addMenuItem(item);
         }
     }
 
-    async _apply(name) {
-        try {
-            const r = await aocctl(['preset', 'apply', name], this._cancellable);
-            const failed = r.settings.filter(s => s.status !== 'unchanged' && s.status !== 'verified');
-            this._setError(failed.length === 0 ? ''
-                : _('%s didn’t fully apply: %s').format(name,
-                    failed.map(s => `${s.id} ${s.error ?? s.status}`).join(', ')));
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                return;
-            this._setError(e.message);
-        }
-        await this.refresh();
+    // Applies a preset after any slider move made before it.
+    _apply(name) {
+        this._flushMove();
+        this._enqueue(async () => {
+            this._writing = true;
+            try {
+                const r = await aocctl(['preset', 'apply', name], this._cancellable);
+                const failed = r.settings.filter(s => s.status !== 'unchanged' && s.status !== 'verified');
+                this._writeError = failed.length === 0 ? ''
+                    : _('%s didn’t fully apply: %s').format(name,
+                        failed.map(s => `${s.id} ${s.error ?? s.status}`).join(', '));
+            } catch (e) {
+                if (isCancelled(e))
+                    return;
+                this._writeError = e.message;
+            } finally {
+                this._writing = false;
+            }
+            await this.refresh();
+        });
     }
 });
 

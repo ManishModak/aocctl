@@ -1,5 +1,6 @@
 // One setting from `aocctl get --json`: a slider for {min, max}, a combo box for {options},
-// or text when it's read-only or couldn't be read.
+// or text when it's read-only or couldn't be read. Changes go to root, which owns the write
+// queue, since a refresh rebuilds every row.
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents3
@@ -14,6 +15,11 @@ RowLayout {
     readonly property bool isRange: domain.max !== undefined
     readonly property bool isChoice: domain.options !== undefined
     readonly property bool editable: readable && setting.writable && (isRange || isChoice)
+    // The newest value asked for, else the last read.
+    readonly property int current: {
+        const r = root.requested(setting.id);
+        return r !== undefined ? r : (setting.value || 0);
+    }
 
     spacing: Kirigami.Units.smallSpacing
 
@@ -31,18 +37,10 @@ RowLayout {
         // The monitor may report a lower maximum than the setting allows.
         to: Math.min(row.domain.max || 0, row.setting.max === undefined ? row.domain.max : row.setting.max)
         stepSize: 1
-        value: row.setting.value || 0
-        onMoved: writeTimer.restart()
-
-        Timer {
-            id: writeTimer
-            interval: 300
-            onTriggered: {
-                if (slider.pressed) {
-                    restart();
-                } else if (slider.value !== row.setting.value) {
-                    root.setValue(row.setting.id, slider.value);
-                }
+        value: row.current
+        onMoved: {
+            if (Math.round(value) !== row.current) {
+                root.edit(row.setting.id, Math.round(value));
             }
         }
     }
@@ -50,7 +48,7 @@ RowLayout {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
         horizontalAlignment: Text.AlignRight
         visible: slider.visible
-        text: slider.value
+        text: Math.round(slider.value)
     }
 
     PlasmaComponents3.ComboBox {
@@ -58,9 +56,9 @@ RowLayout {
         visible: row.editable && row.isChoice
         // The monitor may report fewer choices than the model's list.
         model: row.isChoice ? row.domain.options.slice(0, (row.setting.max ?? row.domain.options.length - 1) + 1) : []
-        currentIndex: row.setting.value ?? -1
+        currentIndex: row.readable ? row.current : -1
         onActivated: index => {
-            if (index !== row.setting.value) {
+            if (index !== row.current) {
                 root.setValue(row.setting.id, index);
             }
         }

@@ -33,11 +33,11 @@ MouseArea {
         Kirigami.Icon {
             Layout.fillHeight: true
             Layout.preferredWidth: height
-            source: root.brightness >= 0 ? "brightness-high" : "video-display"
+            source: root.shownBrightness >= 0 ? "brightness-high" : "video-display"
             active: compact.containsMouse
         }
         PlasmaComponents3.Label {
-            text: root.brightness >= 0 ? i18nc("brightness percent", "%1%", root.brightness) : "--"
+            text: root.shownBrightness >= 0 ? i18nc("brightness percent", "%1%", root.shownBrightness) : "--"
             opacity: root.error ? 0.6 : 1
         }
     }
