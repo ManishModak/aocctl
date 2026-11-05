@@ -243,9 +243,24 @@ PlasmoidItem {
                 : data.status === "verified" ? ""
                 : data.status === "mismatch" ? i18n("Sent %1 to %2, but it reads back %3", op.value, op.id, data.read_back)
                 : i18n("Sent %1 to %2, but couldn't read it back: %3", op.value, op.id, data.error);
+            // Keep what the monitor read back, so controls don't fall back to the old value
+            // until the next read.
+            if (data && data.read_back !== null && data.read_back !== undefined) {
+                remember(op.id, data.read_back);
+            }
             inFlight = null;
             sendNext();
         });
+    }
+
+    function remember(id, value) {
+        if (id === "brightness") {
+            brightness = value;
+        }
+        settings = settings.map(s => s.id !== id ? s : Object.assign({}, s, {
+            value: value,
+            label: s.domain && s.domain.options ? s.domain.options[value] : s.label,
+        }));
     }
 
     // Scroll on the panel icon: steps from the newest value.
