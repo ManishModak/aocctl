@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Waybar custom module for aocctl: shows the AOC monitor's brightness, changes it
+# on scroll and applies a preset from a menu on click. See README.md here.
+#
+#   aocctl-waybar status      print the module's JSON (Waybar's "exec")
+#   aocctl-waybar up|down     change brightness by AOCCTL_STEP (default 5)
+#   aocctl-waybar presets     pick a preset with fuzzel, wofi or rofi and apply it
+#
+# Environment: AOCCTL (aocctl binary), AOCCTL_DISPLAY (connector or serial; needed
+# with more than one AOC monitor), AOCCTL_STEP, AOCCTL_WAYBAR_SIGNAL (default 8,
+# must match the module's "signal"), AOCCTL_MENU (a dmenu-style command).
+set -uo pipefail
+
+aocctl=${AOCCTL:-aocctl}
+display=${AOCCTL_DISPLAY:-}
+step=${AOCCTL_STEP:-5}
+signal=${AOCCTL_WAYBAR_SIGNAL:-8}
+state=${XDG_RUNTIME_DIR:-/tmp}/aocctl-waybar-$(id -u)${display:+-$display}
+mkdir -p "$state"
+
+# Runs aocctl with --json (and --display when set); its JSON goes to stdout.
+run() {
+    "$aocctl" "$@" --json ${display:+--display "$display"} 2>/dev/null
+}
+
+# Turns a `get brightness --json` reply into "value min max" (the setting's domain).
+range='.settings[0] | select(.value != null) | "\(.value) \(.domain.min // 0) \(.domain.max // .max)"'
+
+# Prints the error field of aocctl's JSON output, or a fallback.
+error_of() {
+    local msg
+    msg=$(jq -r '.error // .settings[0]?.error // empty' <<<"$1" 2>/dev/null)
+    echo "${msg:-${2:-aocctl failed}}"
+}
+
+notify() {
+    command -v notify-send >/dev/null && notify-send -a aocctl -i video-display "$1" "${2:-}"
+}
+
+# Asks Waybar to rerun the module's status command.
+refresh() {
+    pkill -RTMIN+"$signal" -x waybar 2>/dev/null || true
+}
+
+status() {
+    local value out tip reading
+    if [[ -s $state/target ]]; then
+        value=$(<"$state/target")
+        tip="Setting brightness to $value%"
+    elif ! command -v "$aocctl" >/dev/null; then
+        jq -nc --arg t "aocctl isn't installed" '{text: "--", tooltip: $t, class: "error"}'
+        return
+    elif out=$(run get brightness) && reading=$(jq -er "$range" <<<"$out"); then
+        echo "$reading" >"$state/value"
+        value=${reading%% *}
+        tip="Brightness $value% on $(jq -r '.display' <<<"$out")"
+    else
+        rm -f "$state/value"
+        jq -nc --arg t "$(error_of "$out" "couldn't read brightness")" '{text: "--", tooltip: $t, class: "error"}'
+        return
+    fi
+    jq -nc --arg v "$value" --arg t "$tip"$'\nScroll to change, click for presets' \
+        '{text: "\($v)%", percentage: ($v | tonumber), tooltip: $t}'
+}
+
+# Scroll handler: moves the target brightness at once (so the bar follows the
+# wheel) and leaves the write to a delayed flush, so a burst of scroll events
+# ends in one or two writes instead of one per event.
+adjust() {
+    local delta=$1 reading cur lo hi out
+    exec 9>"$state/lock"
+    flock 9
+    if [[ -s $state/value ]]; then
+        reading=$(<"$state/value")
+    elif out=$(run get brightness) && reading=$(jq -er "$range" <<<"$out"); then
+        echo "$reading" >"$state/value"
+    else
+        flock -u 9
+        notify "Couldn't read brightness" "$(error_of "$out")"
+        return 1
+    fi
+    read -r cur lo hi <<<"$reading"
+    [[ -s $state/target ]] && cur=$(<"$state/target")
+    cur=$((cur + delta))
+    ((cur < lo)) && cur=$lo
+    ((cur > hi)) && cur=$hi
+    echo "$cur" >"$state/target"
+    flock -u 9
+    refresh
+    (sleep 0.3 && exec "$0" flush) </dev/null >/dev/null 2>&1 &
+    disown
+}
+
+# Writes the newest target. Every scroll starts one flush; they take turns on the
+# writer lock, so a flush that finds no target (an earlier one wrote it) does nothing.
+flush() {
+    exec 8>"$state/writer"
+    flock 8
+    write_target
+}
+
+# Sends the pending target, if any. Call it holding the writer lock (fd 8).
+write_target() {
+    local target out ok
+    exec 9>"$state/lock"
+    flock 9
+    target=$(cat "$state/target" 2>/dev/null)
+    flock -u 9
+    [[ -n $target ]] || return 0
+    out=$(run set brightness "$target")
+    ok=$?
+    flock 9
+    # A newer target set during the write stays for the flush its scroll started.
+    [[ $(cat "$state/target" 2>/dev/null) == "$target" ]] && rm -f "$state/target"
+    rm -f "$state/value"
+    flock -u 9
+    ((ok == 0)) || notify "Couldn't set brightness to $target%" "$(error_of "$out")"
+    refresh
+}
+
+# Runs a dmenu-style picker: AOCCTL_MENU, else the first of fuzzel, wofi, rofi.
+menu() {
+    if [[ -n ${AOCCTL_MENU:-} ]]; then
+        sh -c "$AOCCTL_MENU"
+    elif command -v fuzzel >/dev/null; then
+        fuzzel --dmenu --prompt "Preset: "
+    elif command -v wofi >/dev/null; then
+        wofi --dmenu --prompt Preset
+    elif command -v rofi >/dev/null; then
+        rofi -dmenu -i -p Preset
+    else
+        notify "No menu program found" "Install fuzzel, wofi or rofi, or set AOCCTL_MENU."
+        return 1
+    fi
+}
+
+presets() {
+    local out names pick failed
+    if ! out=$(run preset list); then
+        notify "Couldn't list presets" "$(error_of "$out")"
+        return 1
+    fi
+    names=$(jq -r '.presets[] | select(.error == null) | .name' <<<"$out")
+    if [[ -z $names ]]; then
+        notify "No presets yet" "Save one with: aocctl preset save <name>"
+        return 0
+    fi
+    pick=$(menu <<<"$names") || return 0
+    [[ -n $pick ]] || return 0
+    # Takes the writer lock like a flush, and sends a scroll made before the click first,
+    # so the preset lands after it and no older scroll lands after the preset.
+    exec 8>"$state/writer"
+    flock 8
+    write_target
+    if ! out=$(run preset apply "$pick"); then
+        failed=$(jq -r '[.settings[]? | select(.status != "unchanged" and .status != "verified") |
+            "\(.id): \(.error // .status)"] | join("\n")' <<<"$out" 2>/dev/null)
+        notify "Preset '$pick' didn't fully apply" "${failed:-$(error_of "$out")}"
+    fi
+    rm -f "$state/value"
+    refresh
+}
+
+case ${1:-status} in
+status) status ;;
+up) adjust "$step" ;;
+down) adjust "-$step" ;;
+flush) flush ;;
+presets) presets ;;
+*)
+    echo "usage: aocctl-waybar [status|up|down|presets]" >&2
+    exit 2
+    ;;
+esac

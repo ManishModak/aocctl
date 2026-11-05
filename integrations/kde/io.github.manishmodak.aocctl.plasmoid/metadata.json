@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Manish Modak"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Brightness, AOC monitor settings and presets, through aocctl",
+        "Icon": "video-display",
+        "Id": "io.github.manishmodak.aocctl.plasmoid",
+        "License": "MIT OR Apache-2.0",
+        "Name": "AOC Monitor",
+        "Version": "0.1.0",
+        "Website": "https://github.com/ManishModak/aocctl"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

@@ -1,0 +1,8 @@
+/* Optional: add to your Waybar style.css. */
+#custom-aocctl {
+  padding: 0 8px;
+}
+
+#custom-aocctl.error {
+  opacity: 0.5;
+}

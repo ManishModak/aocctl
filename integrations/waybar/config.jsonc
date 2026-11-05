@@ -1,0 +1,16 @@
+// Add "custom/aocctl" to one of your bar's modules-left/center/right lists,
+// and this block to the bar's config.
+{
+  "custom/aocctl": {
+    "exec": "aocctl-waybar status",
+    "return-type": "json",
+    "interval": 60,
+    "signal": 8,
+    "format": "{icon} {text}",
+    "format-icons": ["󰃞", "󰃟", "󰃠"],
+    "on-scroll-up": "aocctl-waybar up",
+    "on-scroll-down": "aocctl-waybar down",
+    "on-click": "aocctl-waybar presets",
+    "smooth-scrolling-threshold": 1
+  }
+}

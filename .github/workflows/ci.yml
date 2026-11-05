@@ -24,3 +24,5 @@ jobs:
         run: |
           desktop-file-validate gui/data/io.github.manishmodak.aocctl.desktop
           appstreamcli validate --no-net gui/data/io.github.manishmodak.aocctl.metainfo.xml
+      - name: Lint the Waybar module script
+        run: shellcheck integrations/waybar/aocctl-waybar
