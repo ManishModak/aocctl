@@ -14,6 +14,13 @@ use std::time::Duration;
 /// How long a slider must rest before its value is written.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// The row's state from the last reading, before a fixed game mode overrides it.
+#[derive(Default)]
+struct BaseState {
+    subtitle: String,
+    sensitive: bool,
+}
+
 /// Called with a value the user picked; the window sends it to the worker and returns the
 /// request's id, which comes back with its result.
 pub type OnChange = Rc<dyn Fn(&'static Setting, u16) -> u64>;
@@ -31,6 +38,10 @@ pub struct SettingRow {
     wanted: Cell<Option<(u64, u16)>>,
     /// The value the result icon is about; a reading of another value hides the icon.
     status_for: Cell<Option<u16>>,
+    /// FPS, RTS or Racing while the monitor is in one of those fixed game modes.
+    game_mode: Cell<Option<&'static str>>,
+    /// The last reading's subtitle and sensitivity, before the game-mode override.
+    base: RefCell<BaseState>,
     debounce: RefCell<Option<glib::SourceId>>,
     on_change: OnChange,
 }
@@ -80,6 +91,8 @@ impl SettingRow {
             suppress: Cell::new(false),
             wanted: Cell::new(None),
             status_for: Cell::new(None),
+            game_mode: Cell::new(None),
+            base: RefCell::new(BaseState::default()),
             debounce: RefCell::new(None),
             on_change,
         });
@@ -120,13 +133,14 @@ impl SettingRow {
         let r = match reading {
             Ok(r) => *r,
             Err(e) => {
-                self.row.set_sensitive(false);
-                self.row
-                    .set_subtitle(&glib::markup_escape_text(&format!("Couldn't read it: {e}")));
+                *self.base.borrow_mut() = BaseState {
+                    subtitle: format!("Couldn't read it: {e}"),
+                    sensitive: false,
+                };
+                self.apply_availability();
                 return;
             }
         };
-        self.row.set_sensitive(self.setting.verified_write);
         if self.status_for.get() != Some(r.value) {
             self.status.set_visible(false);
         }
@@ -166,7 +180,40 @@ impl SettingRow {
             _ => unreachable!("rows are built from their setting's domain"),
         }
         self.suppress.set(false);
-        self.row.set_subtitle(&glib::markup_escape_text(&subtitle));
+        *self.base.borrow_mut() = BaseState {
+            subtitle,
+            sensitive: self.setting.verified_write,
+        };
+        self.apply_availability();
+    }
+
+    /// Marks the monitor's fixed game mode, so the settings it locks explain that.
+    pub fn set_game_mode(&self, mode: Option<&'static str>) {
+        self.game_mode.set(mode);
+        self.apply_availability();
+    }
+
+    /// Applies a fixed game mode on top of the last reading's subtitle and sensitivity.
+    fn apply_availability(&self) {
+        let base = self.base.borrow();
+        let locked = if self.setting.locked_in_game_presets {
+            self.game_mode.get()
+        } else {
+            None
+        };
+        if let Some(mode) = locked {
+            let note = format!("Not available in {mode} game mode; switch to Off or a Gamer preset");
+            let subtitle = if base.subtitle.is_empty() {
+                note
+            } else {
+                format!("{} — {note}", base.subtitle)
+            };
+            self.row.set_sensitive(false);
+            self.row.set_subtitle(&glib::markup_escape_text(&subtitle));
+        } else {
+            self.row.set_sensitive(base.sensitive);
+            self.row.set_subtitle(&glib::markup_escape_text(&base.subtitle));
+        }
     }
 
     /// The slider moved: write its value once it rests for [`DEBOUNCE`].

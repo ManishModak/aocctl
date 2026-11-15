@@ -7,7 +7,7 @@ use crate::worker::{self, Job, Reply, Values};
 use adw::prelude::*;
 use aocctl::ddc::Reading;
 use aocctl::detect;
-use aocctl::models::{MODE_SETTINGS, Setting};
+use aocctl::models::{self, MODE_SETTINGS, Setting};
 use aocctl::monitor::{Monitor, WriteStatus};
 use aocctl::presets::{self, Outcome, Preset};
 use gtk::{gio, glib};
@@ -27,6 +27,7 @@ const GROUPS: &[(&str, &[&str])] = &[
     (
         "Gaming",
         &[
+            "game-mode",
             "overdrive",
             "shadow-control",
             "game-color",
@@ -389,9 +390,11 @@ impl Window {
             Err(e) if built => self.toast(&format!("Couldn't read the settings: {e}")),
             Err(e) => self.show_status("computer-fail-symbolic", "Couldn't Read the Settings", &e, &[]),
             Ok(values) if built => {
+                let locked = locked_game_mode(&values);
                 let rows = self.state.borrow().rows.clone();
                 for (s, r) in &values {
                     if let Some(row) = rows.iter().find(|row| row.setting.id == s.id) {
+                        row.set_game_mode(locked);
                         row.show(r);
                     }
                 }
@@ -405,6 +408,7 @@ impl Window {
     }
 
     fn build_settings(self: &Rc<Self>, values: &[(&'static Setting, Result<Reading, String>)]) {
+        let locked = locked_game_mode(values);
         let old = std::mem::take(&mut self.state.borrow_mut().groups);
         for g in old {
             self.settings_page.remove(&g);
@@ -452,6 +456,9 @@ impl Window {
                 self.settings_page.add(&group);
                 groups.push(group);
             }
+        }
+        for row in &rows {
+            row.set_game_mode(locked);
         }
         let m = self.current();
         match m.as_ref().filter(|m| m.profile.is_none()) {
@@ -758,6 +765,15 @@ fn model_name(m: &Monitor) -> String {
 /// "AOC 24G4 (DP-1)", as the picker and window subtitle show a monitor.
 fn monitor_label(m: &Monitor) -> String {
     format!("{} ({})", model_name(m), m.connector.name)
+}
+
+/// FPS, RTS or Racing when the readings say the monitor is in a fixed game mode.
+fn locked_game_mode(values: &[(&'static Setting, Result<Reading, String>)]) -> Option<&'static str> {
+    values
+        .iter()
+        .find(|(s, _)| s.id == "game-mode")
+        .and_then(|(_, r)| r.as_ref().ok())
+        .and_then(|r| models::preset_game_mode_label(r.value))
 }
 
 /// "Brightness 10 · Low Blue mode Office"
