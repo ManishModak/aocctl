@@ -253,13 +253,23 @@ PlasmoidItem {
         });
     }
 
+    function labelFor(s, value) {
+        if (s.domain && s.domain.values && s.domain.options) {
+            const i = s.domain.values.indexOf(value);
+            if (i >= 0) {
+                return s.domain.options[i];
+            }
+        }
+        return s.domain && s.domain.options ? s.domain.options[value] : s.label;
+    }
+
     function remember(id, value) {
         if (id === "brightness") {
             brightness = value;
         }
         settings = settings.map(s => s.id !== id ? s : Object.assign({}, s, {
             value: value,
-            label: s.domain && s.domain.options ? s.domain.options[value] : s.label,
+            label: labelFor(s, value),
         }));
     }
 

@@ -162,6 +162,8 @@ pub enum WriteStatus {
 pub enum WriteError {
     #[error("{0} is read-only on this model (its write hasn't been verified yet)")]
     NotVerified(&'static str),
+    #[error("{id} cannot be changed in {mode} game mode; switch to Off, Gamer 1, Gamer 2 or Gamer 3 first")]
+    LockedInGameMode { id: &'static str, mode: &'static str },
     #[error("{id} value {value} is above the maximum {max} the monitor reports")]
     AboveMax { id: &'static str, value: u16, max: u16 },
     #[error(transparent)]
@@ -169,8 +171,15 @@ pub enum WriteError {
 }
 
 /// Writes a setting the model has verified, after checking the monitor's reported
-/// maximum, then reads it back. The write is never resent.
+/// maximum, then reads it back. The write is never resent. In the fixed FPS, RTS
+/// and Racing game modes, settings those modes control are refused before writing.
 pub fn write<T: Transport>(ddc: &mut Ddc<T>, setting: &Setting, value: u16) -> Result<WriteStatus, WriteError> {
+    if setting.locked_in_game_presets {
+        let mode = ddc.get_vcp(models::GAME_MODE_VCP)?;
+        if let Some(mode) = models::preset_game_mode_label(mode.value) {
+            return Err(WriteError::LockedInGameMode { id: setting.id, mode });
+        }
+    }
     if !setting.verified_write {
         return Err(WriteError::NotVerified(setting.id));
     }
@@ -205,6 +214,7 @@ mod tests {
         code: Code::Aoc(0x58),
         domain: Domain::Range { min: 0, max: 100 },
         verified_write: true,
+        locked_in_game_presets: false,
     };
 
     fn shadow_reply(f: &mut Fake, value: u8, max: u8) {
@@ -269,6 +279,69 @@ mod tests {
         let mut d = Ddc::new(fresh, Timing::none());
         assert_eq!(write(&mut d, &COMMON[0], 30), Ok(WriteStatus::Verified));
         assert_eq!(encode(&[0x03, 0x10, 0x00, 30]), d_writes(&d)[1]);
+    }
+
+    fn game_mode(f: &mut Fake, value: u8) {
+        f.reply(&[0x02, 0x00, 0xDC, 0x00, 0x00, 0x10, 0x00, value]);
+    }
+
+    #[test]
+    fn write_refuses_locked_settings_in_a_fixed_game_mode() {
+        let locked = Setting {
+            locked_in_game_presets: true,
+            ..SHADOW
+        };
+        let mut f = Fake::default();
+        game_mode(&mut f, 0x0B); // FPS
+        let mut d = Ddc::new(f, Timing::none());
+        assert_eq!(
+            write(&mut d, &locked, 51),
+            Err(WriteError::LockedInGameMode {
+                id: "shadow-control",
+                mode: "FPS"
+            })
+        );
+        // Only the game-mode read went out; the setting itself was never read or written.
+        assert_eq!(d_writes(&d).len(), 1);
+    }
+
+    #[test]
+    fn write_refuses_the_game_mode_before_the_read_only_check() {
+        let locked_unverified = Setting {
+            verified_write: false,
+            locked_in_game_presets: true,
+            ..SHADOW
+        };
+        let mut f = Fake::default();
+        game_mode(&mut f, 0x0D); // Racing
+        let mut d = Ddc::new(f, Timing::none());
+        assert_eq!(
+            write(&mut d, &locked_unverified, 51),
+            Err(WriteError::LockedInGameMode {
+                id: "shadow-control",
+                mode: "Racing"
+            })
+        );
+    }
+
+    #[test]
+    fn write_allows_locked_settings_when_game_mode_is_off_or_custom() {
+        for mode in [0x00, 0x0E, 0x0F, 0x10] {
+            let locked = Setting {
+                locked_in_game_presets: true,
+                ..SHADOW
+            };
+            let mut f = Fake::default();
+            game_mode(&mut f, mode);
+            shadow_reply(&mut f, 50, 100);
+            shadow_reply(&mut f, 51, 100);
+            let mut d = Ddc::new(f, Timing::none());
+            assert_eq!(
+                write(&mut d, &locked, 51),
+                Ok(WriteStatus::Verified),
+                "game mode {mode:#04x}"
+            );
+        }
     }
 
     fn d_writes(d: &Ddc<Fake>) -> Vec<Vec<u8>> {

@@ -13,11 +13,12 @@ independent project, not made or endorsed by AOC.
 | Model | Settings |
 |---|---|
 | AOC 24G4 | brightness, contrast, shadow-control, game-color, overdrive, low-blue, eco, hdr-mode, dcr, clear-vision, dial-point, frame-counter |
+| AOC 27G1G4 | brightness, contrast, game-mode, shadow-control, game-color, overdrive, low-blue, eco, dcr, dial-point, frame-counter |
 | Other AOC models | brightness, contrast (vendor settings once the model is added; see below) |
 
-Every setting listed for a model has passed a write, read-back and restore
-check on that model. Settings that haven't are read-only until someone with
-that monitor runs [`aocctl verify`](#verify-a-setting) on them.
+Settings are writable only after a write, read-back and restore check passes on
+that model; everything else is read-only until someone with that monitor runs
+[`aocctl verify`](#verify-a-setting) on it.
 
 ## Install
 
@@ -106,6 +107,7 @@ aocctl get                          # all settings of the monitor
 aocctl get overdrive shadow-control
 aocctl set overdrive medium         # values by name or number
 aocctl set shadow-control 55
+aocctl set game-mode racing         # Off, FPS, RTS, Racing, Gamer 1-3
 aocctl set low-blue office --display DP-1   # pick a monitor by connector or serial
 
 aocctl preset save gaming           # save the monitor's current settings as a preset
@@ -121,9 +123,10 @@ reports `verified`, `mismatch` or `unknown`; only `verified` exits 0.
 
 `get --json` lists each setting as `{"id", "name", "value", "max", "label",
 "writable", "domain"}` (with `error` in place of the reading when it fails).
-`domain` is `{"min", "max"}` for a number or `{"options": [...]}` for a choice
-(the value is the option's index), so a widget can build its controls for any
-model.
+`domain` is `{"min", "max"}` for a number, `{"options": [...]}` for a choice
+(the value is the option's index), or `{"options": [...], "values": [...]}` for
+named values that aren't indexed from zero (the 27G1G4's `game-mode`), so a
+widget can build its controls for any model.
 
 When more than one AOC monitor is connected, `--display` is required.
 
@@ -171,10 +174,17 @@ With `--json`, `list` prints `{"schema": 1, "presets": [{"name", "settings":
 
 - `hdr-mode` is the monitor's own HDR-style picture processing. It doesn't turn
   on HDR output from your desktop.
-- Changing `shadow-control` or `game-color` switches the monitor out of its FPS
-  and racing game modes. That is the monitor's behaviour; aocctl doesn't switch
-  the mode back. Applying a preset leaves values that are already set alone,
-  so it only does this when the preset changes one of them.
+- `game-mode` on the 27G1G4 lists Off, FPS, RTS, Racing and the three custom
+  Gamer slots. FPS, RTS and Racing are fixed presets: while one is active,
+  brightness, contrast, shadow control, game color, overdrive, Eco mode and DCR
+  can't be adjusted (the monitor either ignores the write or switches back to
+  Off). aocctl refuses those writes with “cannot be changed in <mode> game
+  mode”; switch to Off or a Gamer preset first. Low Blue, Dial Point and Frame
+  Counter stay adjustable in every mode.
+- On the 24G4, changing `shadow-control` or `game-color` switches the monitor
+  out of its FPS and racing game modes. That is the monitor's behaviour; aocctl
+  doesn't switch the mode back. Applying a preset leaves values that are already
+  set alone, so it only does this when the preset changes one of them.
 - While `hdr-mode` is on, the 24G4 doesn't accept changes to shadow control,
   game color or Low Blue, so a preset that turns HDR mode on and also sets
   them reports `mismatch`.

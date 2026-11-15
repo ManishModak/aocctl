@@ -14,6 +14,8 @@ RowLayout {
     readonly property bool readable: setting.value !== undefined
     readonly property bool isRange: domain.max !== undefined
     readonly property bool isChoice: domain.options !== undefined
+    // Present when the monitor's values aren't 0, 1, 2... (the game-mode VCP).
+    readonly property var choiceValues: domain.values || null
     readonly property bool editable: readable && setting.writable && (isRange || isChoice)
     // The newest value asked for, else the last read.
     readonly property int current: {
@@ -55,11 +57,12 @@ RowLayout {
         Layout.fillWidth: true
         visible: row.editable && row.isChoice
         // The monitor may report fewer choices than the model's list.
-        model: row.isChoice ? row.domain.options.slice(0, (row.setting.max ?? row.domain.options.length - 1) + 1) : []
-        currentIndex: row.readable ? row.current : -1
+        model: row.isChoice ? (row.choiceValues ? row.domain.options : row.domain.options.slice(0, (row.setting.max ?? row.domain.options.length - 1) + 1)) : []
+        currentIndex: row.readable ? (row.choiceValues ? row.choiceValues.indexOf(row.current) : row.current) : -1
         onActivated: index => {
-            if (index !== row.current) {
-                root.setValue(row.setting.id, index);
+            const value = row.choiceValues ? row.choiceValues[index] : index;
+            if (value !== row.current) {
+                root.setValue(row.setting.id, value);
             }
         }
     }

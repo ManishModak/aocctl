@@ -103,9 +103,17 @@ local function readAll()
 end
 
 local function valueText(s, value)
-  local options = s.domain and s.domain.options
-  if options then
-    return options[value + 1] or tostring(value)
+  local domain = s.domain
+  if domain and domain.options then
+    if domain.values then
+      for i, raw in ipairs(domain.values) do
+        if raw == value then
+          return domain.options[i] or tostring(value)
+        end
+      end
+    else
+      return domain.options[value + 1] or tostring(value)
+    end
   end
   return tostring(value)
 end
@@ -226,19 +234,30 @@ local function choiceRow(s)
     })
   else
     -- Only the names the monitor accepts (its reported maximum can be lower than the model's)
-    local names = {}
+    local names, rawValues = {}, {}
+    local values = s.domain.values
     for i, name in ipairs(options) do
-      if s.max == nil or i - 1 <= s.max then
+      local raw = values and values[i] or i - 1
+      if s.max == nil or raw <= s.max then
         table.insert(names, name)
+        table.insert(rawValues, raw)
+      end
+    end
+    local selected = 0
+    for i, raw in ipairs(rawValues) do
+      if raw == s.value then
+        selected = i - 1
+        break
       end
     end
     control = ui.select({
       options = names,
-      selectedIndex = s.value,
+      selectedIndex = selected,
       controlSize = "sm",
       width = 170,
       onChange = function(index)
-        local v = tonumber(index)
+        local picked = tonumber(index)
+        local v = picked and rawValues[picked + 1] or nil
         if v ~= nil and v ~= s.value then
           write(s, v)
         end
