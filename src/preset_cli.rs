@@ -221,7 +221,7 @@ fn summary(values: &[(&'static Setting, u16)]) -> String {
     values
         .iter()
         .map(|(s, v)| match (s.domain, s.label_for(*v)) {
-            (Domain::Enum(_), Some(l)) => format!("{}={}", s.id, normalize(l)),
+            (Domain::Enum(_) | Domain::Values(_), Some(l)) => format!("{}={}", s.id, normalize(l)),
             _ => format!("{}={v}", s.id),
         })
         .collect::<Vec<_>>()

@@ -450,7 +450,7 @@ fn settings_table(values: &[(&'static Setting, u16)]) -> Item {
 /// How a value is stored: numbers for ranges, the value's name for lists.
 fn stored(s: &Setting, v: u16) -> Value {
     match (s.domain, s.label_for(v)) {
-        (Domain::Enum(_), Some(label)) => Value::from(models::normalize(label)),
+        (Domain::Enum(_) | Domain::Values(_), Some(label)) => Value::from(models::normalize(label)),
         _ => Value::from(i64::from(v)),
     }
 }
@@ -780,6 +780,7 @@ settings = { brightness = 300, overdrive = "turbo", gamma = 2, eco = true, contr
                 let max = match s.domain {
                     Domain::Range { max, .. } => max,
                     Domain::Enum(n) => n.len() as u16 - 1,
+                    Domain::Values(v) => v.iter().map(|(value, _)| *value).max().unwrap_or(0),
                 };
                 let v = values.iter().find(|(id, _)| *id == s.id).map_or(0, |(_, v)| *v);
                 sim.state.push((s.code, v, max));

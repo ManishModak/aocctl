@@ -177,7 +177,7 @@ fn describe(s: &Setting, value: u16) -> String {
     match (s.label_for(value), s.domain) {
         (Some(l), _) => format!("{value} ({l})"),
         (None, Domain::Range { .. }) => value.to_string(),
-        (None, Domain::Enum(_)) => format!("{value} (unknown)"),
+        (None, Domain::Enum(_) | Domain::Values(_)) => format!("{value} (unknown)"),
     }
 }
 
@@ -200,8 +200,15 @@ fn get(as_json: bool, m: &Monitor, wanted: &[String]) -> Result<bool, String> {
             rows.push(get_row(s, r.map_err(|e| e.to_string())));
         } else {
             let lock = if s.verified_write { "" } else { "  (read-only)" };
+            let choices = match s.domain {
+                Domain::Values(values) => {
+                    let names: Vec<&str> = values.iter().map(|(_, label)| *label).collect();
+                    format!("  [{}]", names.join(", "))
+                }
+                _ => String::new(),
+            };
             match r {
-                Ok(r) => println!("{:<16} {}{lock}", s.id, describe(s, r.value)),
+                Ok(r) => println!("{:<16} {}{lock}{choices}", s.id, describe(s, r.value)),
                 Err(e) => println!("{:<16} error: {e}", s.id),
             }
         }
@@ -221,6 +228,10 @@ fn get_row(s: &Setting, r: Result<Reading, String>) -> Value {
     let domain = match s.domain {
         Domain::Range { min, max } => json!({ "min": min, "max": max }),
         Domain::Enum(names) => json!({ "options": names }),
+        Domain::Values(values) => json!({
+            "options": values.iter().map(|(_, name)| *name).collect::<Vec<_>>(),
+            "values": values.iter().map(|(value, _)| *value).collect::<Vec<_>>(),
+        }),
     };
     let mut row = match r {
         Ok(r) => json!({
@@ -474,6 +485,19 @@ mod tests {
         let row = get_row(setting("game-color"), Ok(Reading { value: 10, max: 20 }));
         assert_eq!(row["domain"], json!({ "min": 0, "max": 20 }));
         assert_eq!(row["max"], 20);
+    }
+
+    #[test]
+    fn game_mode_rows_list_the_raw_values() {
+        let profile = models::PROFILES.iter().find(|p| p.model == "27G1G4").unwrap();
+        let game_mode = profile.settings.iter().find(|s| s.id == "game-mode").unwrap();
+        let row = get_row(game_mode, Ok(Reading { value: 0x0D, max: 0x10 }));
+        assert_eq!(row["label"], "Racing");
+        assert_eq!(
+            row["domain"]["options"],
+            json!(["Off", "FPS", "RTS", "Racing", "Gamer 1", "Gamer 2", "Gamer 3"])
+        );
+        assert_eq!(row["domain"]["values"], json!([0, 11, 12, 13, 14, 15, 16]));
     }
 
     #[test]

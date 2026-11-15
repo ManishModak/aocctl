@@ -56,6 +56,12 @@ impl SettingRow {
                 combo.set_model(Some(&gtk::StringList::new(names)));
                 (combo.clone().upcast::<adw::ActionRow>(), None, Some(combo))
             }
+            Domain::Values(values) => {
+                let names: Vec<&str> = values.iter().map(|(_, name)| *name).collect();
+                let combo = adw::ComboRow::new();
+                combo.set_model(Some(&gtk::StringList::new(&names)));
+                (combo.clone().upcast::<adw::ActionRow>(), None, Some(combo))
+            }
         };
         row.set_title(setting.label);
         let status = gtk::Image::new();
@@ -91,8 +97,9 @@ impl SettingRow {
                 let picked = combo.selected();
                 if let Some(row) = weak.upgrade().filter(|r| !r.suppress.get())
                     && picked != gtk::INVALID_LIST_POSITION
+                    && let Some(value) = row.combo_value(picked)
                 {
-                    row.send(picked as u16);
+                    row.send(value);
                 }
             });
         }
@@ -137,6 +144,17 @@ impl SettingRow {
             (Domain::Enum(names), _, Some(combo)) => {
                 if (r.value as usize) < names.len() {
                     combo.set_selected(r.value.into());
+                } else {
+                    combo.set_selected(gtk::INVALID_LIST_POSITION);
+                    subtitle = format!(
+                        "The monitor reports value {}, which isn't one of these (another setting may control it)",
+                        r.value
+                    );
+                }
+            }
+            (Domain::Values(values), _, Some(combo)) => {
+                if let Some(i) = values.iter().position(|(value, _)| *value == r.value) {
+                    combo.set_selected(i as u32);
                 } else {
                     combo.set_selected(gtk::INVALID_LIST_POSITION);
                     subtitle = format!(
@@ -215,6 +233,15 @@ impl SettingRow {
         self.status.set_tooltip_text(Some(&tip));
         self.status.set_visible(true);
         true
+    }
+
+    /// Maps a combo-row position to the raw value the monitor uses.
+    fn combo_value(&self, picked: u32) -> Option<u16> {
+        match self.setting.domain {
+            Domain::Enum(_) => Some(picked as u16),
+            Domain::Values(values) => values.get(picked as usize).map(|(value, _)| *value),
+            Domain::Range { .. } => None,
+        }
     }
 
     /// The slider's current upper bound, to redisplay a read-back value within it.

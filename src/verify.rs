@@ -9,11 +9,11 @@
 //! (which repeats its last answer) can never pass as the setting's value.
 
 use crate::ddc::{Ddc, DdcError, Reading, Transport};
-use crate::models::{Code, Domain, Setting};
+use crate::models::{self, Code, Domain, Setting};
 use crate::monitor;
 
 /// Standard VCP code of the monitor's game mode (MCCS "display application").
-pub const GAME_MODE: u8 = 0xDC;
+pub const GAME_MODE: u8 = models::GAME_MODE_VCP;
 /// Read-backs per write: the value may still be settling after the first.
 const POLLS: usize = 3;
 
@@ -66,13 +66,31 @@ pub fn effective_domain(setting: &Setting, reported_max: u16) -> Option<(u16, u1
     let (lo, hi) = match setting.domain {
         Domain::Range { min, max } => (min, max),
         Domain::Enum(names) => (0, (names.len() as u16).checked_sub(1)?),
+        Domain::Values(values) => (
+            values.iter().map(|(v, _)| *v).min()?,
+            values.iter().map(|(v, _)| *v).filter(|v| *v <= reported_max).max()?,
+        ),
     };
     let hi = hi.min(reported_max);
     (lo <= hi).then_some((lo, hi))
 }
 
-/// The value to test: one step down if possible, else one step up.
-pub fn test_value(current: u16, (lo, hi): (u16, u16)) -> Option<u16> {
+/// The value to test: one allowed step down if possible, else one step up.
+pub fn test_value(setting: &Setting, current: u16, (lo, hi): (u16, u16)) -> Option<u16> {
+    if let Domain::Values(values) = setting.domain {
+        let mut allowed: Vec<u16> = values
+            .iter()
+            .map(|(v, _)| *v)
+            .filter(|v| *v >= lo && *v <= hi)
+            .collect();
+        allowed.sort_unstable();
+        let pos = allowed.iter().position(|v| *v == current)?;
+        return if pos > 0 {
+            Some(allowed[pos - 1])
+        } else {
+            allowed.get(pos + 1).copied()
+        };
+    }
     if current > lo {
         Some(current - 1)
     } else if current < hi {
@@ -138,8 +156,16 @@ pub fn verify<T: Transport>(
             setting.id, before.value, domain.0, domain.1
         ));
     }
-    let test = test_value(before.value, domain).ok_or_else(|| format!("{} has only one value", setting.id))?;
+    let test = test_value(setting, before.value, domain).ok_or_else(|| format!("{} has only one value", setting.id))?;
     let game_mode_before = ddc.get_vcp(GAME_MODE).ok().map(|r| r.value);
+    if setting.locked_in_game_presets
+        && let Some(mode) = game_mode_before.and_then(models::preset_game_mode_label)
+    {
+        return Err(format!(
+            "{} cannot be changed in {mode} game mode; switch to Off, Gamer 1, Gamer 2 or Gamer 3 first",
+            setting.id
+        ));
+    }
     recheck()?;
     announce(before.value, test);
 
@@ -178,6 +204,7 @@ mod tests {
         code: Code::Aoc(0x58),
         domain: Domain::Range { min: 0, max: 100 },
         verified_write: false,
+        locked_in_game_presets: false,
     };
 
     fn shadow(f: &mut Fake, value: u8) {
@@ -191,8 +218,11 @@ mod tests {
         marker(f);
         shadow(f, value);
     }
+    fn game_mode_value(f: &mut Fake, value: u8) {
+        f.reply(&[0x02, 0x00, GAME_MODE, 0x00, 0x00, 16, 0x00, value]);
+    }
     fn game_mode(f: &mut Fake) {
-        f.reply(&[0x02, 0x00, GAME_MODE, 0x00, 0x00, 16, 0x00, 0]);
+        game_mode_value(f, 0);
     }
     fn set(value: u8) -> Vec<u8> {
         encode(&[0x03, 0xF8, 0xE1, 0x58, 0x00, value])
@@ -208,9 +238,9 @@ mod tests {
 
     #[test]
     fn test_value_steps_down_first_and_stays_in_the_domain() {
-        assert_eq!(test_value(50, (0, 100)), Some(49));
-        assert_eq!(test_value(0, (0, 100)), Some(1));
-        assert_eq!(test_value(3, (3, 3)), None);
+        assert_eq!(test_value(&SHADOW, 50, (0, 100)), Some(49));
+        assert_eq!(test_value(&SHADOW, 0, (0, 100)), Some(1));
+        assert_eq!(test_value(&SHADOW, 3, (3, 3)), None);
         let overdrive = Setting {
             domain: Domain::Enum(&["Off", "Weak", "Medium", "Strong"]),
             ..SHADOW
@@ -223,6 +253,15 @@ mod tests {
             ..SHADOW
         };
         assert_eq!(effective_domain(&high_min, 5), None);
+
+        let game_mode = Setting {
+            domain: Domain::Values(models::GAME_MODES),
+            ..SHADOW
+        };
+        assert_eq!(effective_domain(&game_mode, 0x10), Some((0x00, 0x10)));
+        assert_eq!(test_value(&game_mode, 0x0D, (0x00, 0x10)), Some(0x0C));
+        assert_eq!(test_value(&game_mode, 0x0B, (0x00, 0x10)), Some(0x00));
+        assert_eq!(test_value(&game_mode, 0x00, (0x00, 0x10)), Some(0x0B));
     }
 
     #[test]
@@ -336,6 +375,21 @@ mod tests {
         f.reply(&[0x02, 0x00, 0xF8, 0x58, 0x00, 60, 0x00, 61]);
         let (r, d) = run(f);
         assert!(r.is_err());
+        assert!(sets(&d).is_empty());
+    }
+
+    #[test]
+    fn locked_settings_are_not_tested_in_a_fixed_game_mode() {
+        let locked = Setting {
+            locked_in_game_presets: true,
+            ..SHADOW
+        };
+        let mut f = Fake::default();
+        fresh(&mut f, 50);
+        game_mode_value(&mut f, 0x0B); // FPS
+        let mut d = Ddc::new(f, Timing::none());
+        let err = verify(&mut d, &locked, || Ok(()), |_, _| {}).unwrap_err();
+        assert!(err.contains("FPS"), "{err}");
         assert!(sets(&d).is_empty());
     }
 }
