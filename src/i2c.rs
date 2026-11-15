@@ -11,8 +11,25 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 const I2C_SLAVE: libc::Ioctl = 0x0703;
+const I2C_RDWR: libc::Ioctl = 0x0707;
+const I2C_M_RD: u16 = 0x0001;
 const DDC_ADDR: libc::c_ulong = 0x37;
+const EDID_ADDR: u16 = 0x50;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[repr(C)]
+struct I2cMsg {
+    addr: u16,
+    flags: u16,
+    len: u16,
+    buf: *mut u8,
+}
+
+#[repr(C)]
+struct I2cRdwrData {
+    msgs: *mut I2cMsg,
+    nmsgs: u32,
+}
 
 pub struct I2cDev {
     file: File,
@@ -44,6 +61,46 @@ impl I2cDev {
         }
         Ok(I2cDev { file })
     }
+}
+
+/// Reads a monitor's 128-byte base EDID block over DDC, at i2c address 0x50.
+/// Works on buses that the DRM connector doesn't link to, such as the virtual
+/// "DPMST" buses of an MST hub. Doesn't lock: callers use it only to identify a
+/// display, and a display may be the one this process already locked.
+pub fn read_edid(bus: u32) -> Result<Vec<u8>, DdcError> {
+    let path = std::path::PathBuf::from(format!("/dev/i2c-{bus}"));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| DdcError::Access(format!("{}: {e}", path.display())))?;
+    let fd = file.as_raw_fd();
+    let mut offset = [0u8; 1];
+    let mut buf = vec![0u8; 128];
+    let mut msgs = [
+        I2cMsg {
+            addr: EDID_ADDR,
+            flags: 0,
+            len: 1,
+            buf: offset.as_mut_ptr(),
+        },
+        I2cMsg {
+            addr: EDID_ADDR,
+            flags: I2C_M_RD,
+            len: buf.len() as u16,
+            buf: buf.as_mut_ptr(),
+        },
+    ];
+    let mut data = I2cRdwrData {
+        msgs: msgs.as_mut_ptr(),
+        nmsgs: msgs.len() as u32,
+    };
+    // SAFETY: the kernel reads `nmsgs` messages from the pointer, and every
+    // message points at a live buffer of its stated length for the call.
+    if unsafe { libc::ioctl(fd, I2C_RDWR, &mut data) } < 0 {
+        return Err(DdcError::Io(std::io::Error::last_os_error().to_string()));
+    }
+    Ok(buf)
 }
 
 impl Transport for I2cDev {

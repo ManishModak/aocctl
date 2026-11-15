@@ -20,4 +20,9 @@ external "${adapter%/*}" && exit 0
 for c in /sys/class/drm/card*-*; do
 	[ "$(readlink -f "$c/ddc")" = "$adapter" ] && external "$(readlink -f "$c")" && exit 0
 done
+
+# A DP-MST hub exposes each monitor's DDC bus as a virtual adapter named "DPMST"
+# that no DRM connector links to. It is still a monitor bus.
+[ "$(cat "$adapter/name" 2>/dev/null)" = DPMST ] && exit 0
+
 exit 1
