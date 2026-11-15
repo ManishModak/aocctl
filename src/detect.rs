@@ -2,11 +2,13 @@
 //! DDC/CI answers on. Only buses tied to a connector are ever opened.
 
 use crate::edid::{self, Edid};
+use crate::i2c;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const SYSFS_DRM: &str = "/sys/class/drm";
+const SYSFS_I2C: &str = "/sys/bus/i2c/devices";
 
 #[derive(Debug, Clone)]
 pub struct Connector {
@@ -26,6 +28,9 @@ pub fn connectors(root: &Path) -> Vec<Connector> {
     let Ok(entries) = fs::read_dir(root) else { return found };
     let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     paths.sort();
+    // EDID of every DP-MST DDC bus, read once; only needed when a connector has no
+    // bus of its own.
+    let mut mst: Option<Vec<(u32, Vec<u8>)>> = None;
     for path in paths {
         let Some(dir) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
@@ -40,14 +45,22 @@ pub fn connectors(root: &Path) -> Vec<Connector> {
         if status.trim() != "connected" {
             continue;
         }
-        let Some(edid) = fs::read(path.join("edid")).ok().and_then(|raw| edid::parse(&raw)) else {
+        let Some(raw) = fs::read(path.join("edid")).ok().filter(|raw| raw.len() >= 128) else {
             continue;
         };
+        let Some(edid) = edid::parse(&raw) else {
+            continue;
+        };
+        let mut connector_buses = buses(&path);
+        if connector_buses.is_empty() && root == Path::new(SYSFS_DRM) {
+            let mst = mst.get_or_insert_with(mst_edids);
+            connector_buses.extend(mst.iter().filter(|(_, e)| e[..128] == raw[..128]).map(|(b, _)| *b));
+        }
         found.push(Connector {
             id: dir.to_string(),
             name: name.to_string(),
             edid,
-            buses: buses(&path),
+            buses: connector_buses,
         });
     }
     let mut uses: HashMap<u32, usize> = HashMap::new();
@@ -84,6 +97,27 @@ fn buses(connector: &Path) -> Vec<u32> {
         .and_then(|t| bus_number(t.file_name()?.to_str()?));
     children.extend(ddc.filter(|d| !children.contains(d)));
     children
+}
+
+/// DP-MST hubs expose each monitor's DDC bus as a separate i2c adapter named
+/// "DPMST" that no connector links to, so the bus is found by reading its EDID
+/// and comparing it with the connector's.
+fn mst_edids() -> Vec<(u32, Vec<u8>)> {
+    let mut buses: Vec<u32> = fs::read_dir(SYSFS_I2C)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            e.file_name().to_str().is_some_and(|n| bus_number(n).is_some())
+                && fs::read_to_string(e.path().join("name")).is_ok_and(|n| n.trim_start().starts_with("DPMST"))
+        })
+        .filter_map(|e| bus_number(e.file_name().to_str()?))
+        .collect();
+    buses.sort_unstable();
+    buses
+        .into_iter()
+        .filter_map(|bus| i2c::read_edid(bus).ok().map(|edid| (bus, edid)))
+        .collect()
 }
 
 pub fn dev_path(bus: u32) -> PathBuf {
